@@ -27,6 +27,7 @@ final class TorrentStore {
     }
 
     func start() {
+        if DemoTorrents.isEnabled { loadDemo(); return }
         let session = session
         queue.async { [weak self] in
             session.restoreTorrents()
@@ -34,6 +35,17 @@ final class TorrentStore {
         }
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
+        }
+    }
+
+    private func loadDemo() {
+        torrents = DemoTorrents.makeTorrents()
+        for torrent in torrents { byID[torrent.id] = torrent }
+        downloadRate = torrents.reduce(0) { $0 + $1.downloadRate }
+        uploadRate = torrents.reduce(0) { $0 + $1.uploadRate }
+        speedHistory = (0..<120).map { i in
+            let wave = 0.8 + 0.2 * sin(Double(i) / 8)
+            return SpeedSample(down: Int(Double(downloadRate) * wave), up: Int(Double(uploadRate) * wave))
         }
     }
 

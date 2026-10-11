@@ -112,7 +112,7 @@ enum AppPaths {
 
     static let support: URL = {
         // Tests get a throwaway folder so they never touch real downloads or settings.
-        let base = isTesting
+        let base = isTesting || DemoTorrents.isEnabled
             ? FileManager.default.temporaryDirectory.appendingPathComponent("kTorrentTests-\(ProcessInfo.processInfo.processIdentifier)")
             : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let url = base.appendingPathComponent("kTorrent", isDirectory: true)

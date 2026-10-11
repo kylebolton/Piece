@@ -22,11 +22,19 @@ rm -rf dist && mkdir dist
 cp -R "$APP" dist/
 
 IDENTITY="${DEVELOPER_ID:--}"
-for helper in dist/kTorrent.app/Contents/Helpers/*; do
-  codesign --force --options runtime --timestamp=none --sign "$IDENTITY" "$helper"
-done
-codesign --force --options runtime --timestamp=none --sign "$IDENTITY" dist/kTorrent.app
-[ "$IDENTITY" = "-" ] || codesign --force --options runtime --timestamp --deep --sign "$IDENTITY" dist/kTorrent.app
+ENTITLEMENTS=Sources/KTorrent/Resources/kTorrent.entitlements
+sign() { codesign --force --options runtime --timestamp=none --sign "$IDENTITY" "$@"; }
+# Inside-out: Sparkle's helpers, then the framework, then ffmpeg, then the app (which keeps its entitlements).
+SPARKLE=dist/kTorrent.app/Contents/Frameworks/Sparkle.framework/Versions/B
+if [ -d "$SPARKLE" ]; then
+  for nested in "$SPARKLE"/XPCServices/*.xpc "$SPARKLE"/Autoupdate "$SPARKLE"/Updater.app; do
+    [ -e "$nested" ] && sign "$nested"
+  done
+  sign dist/kTorrent.app/Contents/Frameworks/Sparkle.framework
+fi
+for helper in dist/kTorrent.app/Contents/Helpers/*; do sign "$helper"; done
+sign --entitlements "$ENTITLEMENTS" dist/kTorrent.app
+[ "$IDENTITY" = "-" ] || codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" dist/kTorrent.app
 
 ditto -c -k --keepParent dist/kTorrent.app dist/kTorrent.zip
 echo "== dist/kTorrent.app =="
