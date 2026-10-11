@@ -16,8 +16,9 @@ final class LiveSiteTests: XCTestCase {
                 print("LIVE   RESULT none")
                 continue
             }
+            let filled = await TrackerScraper.fill(outcome.sample)
             print("LIVE   RESULT \(outcome.provider.kind.rawValue) \(outcome.provider.url) → \(outcome.sample.count) results")
-            for result in outcome.sample.prefix(4) {
+            for result in filled.prefix(6) {
                 print("LIVE     \(result.title.prefix(60)) | size=\(result.size.map(Format.bytes) ?? "-") s=\(result.seeders.map(String.init) ?? "-") l=\(result.leechers.map(String.init) ?? "-") magnet=\(result.magnet != nil) torrent=\(result.torrentURL != nil) details=\(result.detailsURL != nil)")
             }
             if let first = outcome.sample.first, first.needsResolving {

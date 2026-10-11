@@ -3,6 +3,12 @@ import SwiftSoup
 
 enum SearchEngine {
     static func search(_ query: String, provider: SearchProvider) async throws -> [SearchResult] {
+        let results = try await listings(query, provider: provider)
+        // Feeds such as BT4G's omit peer counts; ask the trackers instead.
+        return await TrackerScraper.fill(results)
+    }
+
+    private static func listings(_ query: String, provider: SearchProvider) async throws -> [SearchResult] {
         switch provider.kind {
         case .internetArchive:
             return try await internetArchive(query, name: provider.name)
@@ -116,7 +122,7 @@ enum SiteDetector {
     ]
 
     private static let commonPatterns = [
-        "/search?q={query}", "/search/{query}", "/?s={query}", "/search.php?q={query}", "/torrents?search={query}",
+        "/search?q={query}&page=rss", "/search?q={query}", "/search/{query}", "/?s={query}", "/search.php?q={query}", "/torrents?search={query}",
         "/search/?search={query}", "/search/{query}/1/", "/?q={query}", "/torrents.php?search={query}", "/search?query={query}",
     ]
 
@@ -145,11 +151,14 @@ enum SiteDetector {
 
         // 3. Look at the page itself.
         await log("Loading \(host)…")
-        guard let page = try? await HTTP.page(inputURL), page.status < 400 else {
-            await log("Couldn't load that address.")
-            return nil
+        var loaded: HTTP.Page?
+        if let page = try? await HTTP.page(inputURL), page.status < 400 {
+            loaded = page
+        } else {
+            // Sites behind a bot challenge refuse the home page but may still serve their RSS or API endpoints.
+            await log("Couldn't load the page itself; trying the site's known search addresses…")
         }
-        if page.looksLikeFeed {
+        if let page = loaded, page.looksLikeFeed {
             let results = FeedParser.parse(Data(page.text.utf8), provider: name)
             if !results.isEmpty {
                 await log("Found an RSS feed with \(results.count) torrents.")
@@ -168,7 +177,7 @@ enum SiteDetector {
             if let string = components.string { templates.append(string.replacingOccurrences(of: "QUERYPLACEHOLDER", with: "{query}")) }
         }
 
-        if let document = try? SwiftSoup.parse(page.text, page.url.absoluteString) {
+        if let page = loaded, let document = try? SwiftSoup.parse(page.text, page.url.absoluteString) {
             // OpenSearch description, the same thing browsers use to add a site as a search engine.
             if let link = try? document.select("link[rel=search]").first(), let href = try? link.absUrl("href"),
                let url = URL(string: href), let description = try? await HTTP.page(url) {
