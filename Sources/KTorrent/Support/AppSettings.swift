@@ -72,7 +72,7 @@ final class AppSettings {
 
     var sessionSettings: KTSessionSettings {
         let s = KTSessionSettings()
-        s.listenPort = Int32(listenPort)
+        s.listenPort = Int32(AppPaths.isTesting ? 0 : listenPort)
         s.downloadRateLimit = Int32(downloadLimitKB * 1024)
         s.uploadRateLimit = Int32(uploadLimitKB * 1024)
         s.maxActiveDownloads = Int32(maxActiveDownloads)

@@ -82,19 +82,59 @@ final class AppModel {
         audio.stop()
         library.saveNow()
         torrents.shutdown()
+        try? FileManager.default.removeItem(at: AppPaths.temporary)
     }
 
     // MARK: - Opening things
 
     func open(urls: [URL]) {
         for url in urls {
+            if url.scheme?.lowercased() == "ktorrent" {
+                handleDeepLink(url)
+                continue
+            }
             if url.scheme?.lowercased() == "magnet" {
                 torrents.add(magnet: url.absoluteString)
             } else if url.isFileURL, url.pathExtension.lowercased() == "torrent" {
                 torrents.add(fileURL: url)
             }
         }
-        selection = .transfers(.all)
+        if !urls.contains(where: { $0.scheme?.lowercased() == "ktorrent" }) { selection = .transfers(.all) }
+    }
+
+    /// `ktorrent://show/films`, `ktorrent://search?q=…`, `ktorrent://play?hash=…`, `ktorrent://inspect?hash=…`
+    private func handleDeepLink(_ url: URL) {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
+        switch url.host?.lowercased() {
+        case "show":
+            switch url.lastPathComponent.lowercased() {
+            case "films": selection = .films
+            case "tv": selection = .tv
+            case "music": selection = .music
+            case "other": selection = .other
+            case "search": selection = .search
+            case "sources": selection = .sources
+            default: selection = .transfers(.all)
+            }
+        case "search":
+            selection = .search
+            search.query = value("q") ?? ""
+            search.search()
+        case "play":
+            if let hash = value("hash")?.lowercased(), let torrent = torrents.torrent(hash) {
+                if value("muted") == "1" { player.player.isMuted = true }
+                preview(torrent)
+            }
+        case "inspect":
+            if let hash = value("hash")?.lowercased() {
+                selection = .transfers(.all)
+                selectedTorrents = [hash]
+                showInspector = true
+            }
+        default:
+            break
+        }
     }
 
     func addFromPasteboard() -> Bool {

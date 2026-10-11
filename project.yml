@@ -90,6 +90,9 @@ targets:
           - CFBundleURLName: BitTorrent Magnet Link
             CFBundleTypeRole: Viewer
             CFBundleURLSchemes: [magnet]
+          - CFBundleURLName: kTorrent Link
+            CFBundleTypeRole: Viewer
+            CFBundleURLSchemes: [ktorrent]
         CFBundleDocumentTypes:
           - CFBundleTypeName: BitTorrent File
             CFBundleTypeRole: Viewer

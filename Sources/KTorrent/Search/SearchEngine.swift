@@ -67,7 +67,7 @@ enum SearchEngine {
 
     static func internetArchive(_ query: String, name: String) async throws -> [SearchResult] {
         var components = URLComponents(string: "https://archive.org/advancedsearch.php")!
-        var items = [URLQueryItem(name: "q", value: "(\(query)) AND format:(\"Archive BitTorrent\")")]
+        var items = [URLQueryItem(name: "q", value: internetArchiveQuery(query))]
         for field in ["identifier", "title", "item_size", "downloads", "publicdate", "mediatype"] {
             items.append(URLQueryItem(name: "fl[]", value: field))
         }
@@ -76,6 +76,15 @@ enum SearchEngine {
         components.queryItems = items
         let page = try await fetch(components.url!)
         return parseInternetArchive(Data(page.text.utf8), name: name)
+    }
+
+    /// Matches every word against item titles; searching all metadata returns mostly unrelated items.
+    static func internetArchiveQuery(_ query: String) -> String {
+        let words = query.split(whereSeparator: { $0.isWhitespace })
+            .map { $0.filter { $0.isLetter || $0.isNumber || $0 == "." || $0 == "'" } }
+            .filter { !$0.isEmpty }
+        let title = words.isEmpty ? "*" : words.joined(separator: " AND ")
+        return "title:(\(title)) AND format:(\"Archive BitTorrent\")"
     }
 
     static func parseInternetArchive(_ data: Data, name: String) -> [SearchResult] {
@@ -195,6 +204,9 @@ enum SiteDetector {
         }
         templates += commonPatterns.map { origin + $0 }
 
+        // A form that posts to another site (a web search engine, say) isn't this site's search.
+        templates = templates.filter { URL(string: $0.replacingOccurrences(of: "{query}", with: "x"))?.host == host }
+
         var tried = Set<String>()
         for template in templates where tried.insert(template).inserted {
             if let outcome = await tryTemplate(template, name: name, testQuery: testQuery, log: log) { return outcome }
@@ -218,6 +230,11 @@ enum SiteDetector {
         // A search page that ignores the query returns links unrelated to it.
         let relevant = SearchEngine.filter(results, query: testQuery)
         guard results.count >= 2, relevant.count * 3 >= results.count else { return nil }
+        // When results only link to detail pages, make sure a download link can really be read from one.
+        if let first = results.first, first.needsResolving {
+            await log("Checking a result page for a download link…")
+            guard (try? await SearchEngine.resolve(first)) != nil else { return nil }
+        }
         await log("Found \(results.count) results.")
         return Outcome(provider: SearchProvider(name: name, kind: .html, url: template), sample: results)
     }
@@ -269,6 +286,8 @@ final class SearchStore {
     static let builtIn: [SearchProvider] = [
         SearchProvider(id: UUID(uuidString: "0A1C7C58-5B0B-4C1E-9C55-000000000001")!, name: "Internet Archive",
                        kind: .internetArchive, url: "https://archive.org", isBuiltIn: true),
+        SearchProvider(id: UUID(uuidString: "0A1C7C58-5B0B-4C1E-9C55-000000000002")!, name: "Linux Tracker",
+                       kind: .html, url: "https://linuxtracker.org/torrents/?q={query}", isBuiltIn: true),
     ]
 
     init() {

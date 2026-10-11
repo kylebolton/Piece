@@ -104,6 +104,9 @@ NS_SWIFT_SENDABLE
 
 - (void)applySettings:(KTSessionSettings *)settings;
 
+/// Builds a .torrent for a file or folder on disk. Returns nil if it can't be read.
++ (nullable NSData *)createTorrentForPath:(NSString *)path;
+
 /// Restores every torrent saved in the state directory.
 - (void)restoreTorrents;
 

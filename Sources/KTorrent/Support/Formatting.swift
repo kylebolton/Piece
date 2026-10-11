@@ -107,8 +107,14 @@ enum FileKind {
 }
 
 enum AppPaths {
+    /// True when the app is only running as the host for unit tests.
+    static let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     static let support: URL = {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        // Tests get a throwaway folder so they never touch real downloads or settings.
+        let base = isTesting
+            ? FileManager.default.temporaryDirectory.appendingPathComponent("kTorrentTests-\(ProcessInfo.processInfo.processIdentifier)")
+            : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let url = base.appendingPathComponent("kTorrent", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
@@ -124,7 +130,9 @@ enum AppPaths {
     static var subtitles: URL { directory("Subtitles") }
 
     static let temporary: URL = {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("kTorrent", isDirectory: true)
+        // Per-process, so a second copy of the app can't delete streams this one is serving.
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kTorrent-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
         try? FileManager.default.removeItem(at: url)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
