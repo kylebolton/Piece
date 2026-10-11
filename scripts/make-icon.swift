@@ -1,5 +1,5 @@
 #!/usr/bin/env swift
-// Renders the kTorrent app icon into the asset catalog.
+// Renders the Swarmly app icon into the asset catalog.
 // Usage: swift scripts/make-icon.swift
 import AppKit
 import CoreGraphics
@@ -41,12 +41,27 @@ let shade = CGGradient(colorsSpace: space, colors: [color(0x0E0640, 0), color(0x
 context.drawLinearGradient(shade, start: CGPoint(x: 512, y: 480), end: CGPoint(x: 512, y: 100), options: [])
 context.restoreGState()
 
-// Glyph: a lowercase "k" whose stem is a download arrow.
-let weight: CGFloat = 92
+// Glyph: a swarm of peers funnelling into a download arrow.
+func dot(_ x: CGFloat, _ y: CGFloat, _ r: CGFloat, _ fill: CGColor) {
+    context.saveGState()
+    context.setShadow(offset: CGSize(width: 0, height: -6), blur: 14, color: color(0x14084D, 0.4))
+    context.setFillColor(fill)
+    context.fillEllipse(in: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2))
+    context.restoreGState()
+}
+
+let mint = color(0x7CF5D0)
+let mintSoft = color(0x7CF5D0, 0.7)
+// (x, y, radius): wide at the top, narrowing toward the arrow.
+let swarm: [(CGFloat, CGFloat, CGFloat)] = [
+    (290, 790, 34), (400, 842, 28), (512, 800, 40), (624, 846, 30), (734, 786, 34),
+    (350, 706, 26), (452, 730, 32), (572, 724, 26), (674, 700, 30),
+]
+for (index, d) in swarm.enumerated() { dot(d.0, d.1, d.2, index % 3 == 0 ? mint : mintSoft) }
+
 context.setLineCap(.round)
 context.setLineJoin(.round)
-context.setLineWidth(weight)
-
+context.setLineWidth(96)
 func stroke(_ points: [CGPoint], _ strokeColor: CGColor, shadow: Bool = true) {
     context.saveGState()
     if shadow { context.setShadow(offset: CGSize(width: 0, height: -10), blur: 22, color: color(0x14084D, 0.45)) }
@@ -56,13 +71,9 @@ func stroke(_ points: [CGPoint], _ strokeColor: CGColor, shadow: Bool = true) {
     context.strokePath()
     context.restoreGState()
 }
+stroke([CGPoint(x: 512, y: 640), CGPoint(x: 512, y: 270)], color(0xFFFFFF))
+stroke([CGPoint(x: 352, y: 420), CGPoint(x: 512, y: 270), CGPoint(x: 672, y: 420)], color(0xFFFFFF), shadow: false)
 
-let stemX: CGFloat = 430
-// Arms of the k, in mint so the arrow stays the hero.
-stroke([CGPoint(x: 684, y: 770), CGPoint(x: stemX + 62, y: 604), CGPoint(x: 684, y: 468)], color(0x7CF5D0))
-// Stem and arrowhead.
-stroke([CGPoint(x: stemX, y: 790), CGPoint(x: stemX, y: 262)], color(0xFFFFFF))
-stroke([CGPoint(x: stemX - 120, y: 382), CGPoint(x: stemX, y: 262), CGPoint(x: stemX + 120, y: 382)], color(0xFFFFFF), shadow: false)
 
 // Top highlight on the tile edge.
 context.saveGState()
@@ -77,7 +88,7 @@ context.drawLinearGradient(rim, start: CGPoint(x: 512, y: 924), end: CGPoint(x: 
 context.restoreGState()
 
 let root = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().deletingLastPathComponent()
-let iconset = root.appendingPathComponent("Sources/KTorrent/Resources/Assets.xcassets/AppIcon.appiconset")
+let iconset = root.appendingPathComponent("Sources/Swarmly/Resources/Assets.xcassets/AppIcon.appiconset")
 try? FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
 
 let master = context.makeImage()!

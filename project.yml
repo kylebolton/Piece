@@ -1,4 +1,4 @@
-name: kTorrent
+name: Swarmly
 options:
   bundleIdPrefix: me.kylebolton
   deploymentTarget:
@@ -18,8 +18,8 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
-    MARKETING_VERSION: "1.0.3"
-    CURRENT_PROJECT_VERSION: "4"
+    MARKETING_VERSION: "1.1.0"
+    CURRENT_PROJECT_VERSION: "5"
     # Ad-hoc signing by default so the project builds on any Mac.
     # scripts/release.sh re-signs with a Developer ID identity.
     CODE_SIGN_STYLE: Manual
@@ -28,11 +28,11 @@ settings:
     DEAD_CODE_STRIPPING: YES
 
 targets:
-  kTorrent:
+  Swarmly:
     type: application
     platform: macOS
     sources:
-      - path: Sources/KTorrent
+      - path: Sources/Swarmly
       - path: Sources/TorrentBridge
     dependencies:
       - package: SwiftSoup
@@ -42,14 +42,14 @@ targets:
       - sdk: SystemConfiguration.framework
     settings:
       base:
-        PRODUCT_NAME: kTorrent
-        PRODUCT_MODULE_NAME: KTorrent
-        PRODUCT_BUNDLE_IDENTIFIER: me.kylebolton.kTorrent
+        PRODUCT_NAME: Swarmly
+        PRODUCT_MODULE_NAME: Swarmly
+        PRODUCT_BUNDLE_IDENTIFIER: me.kylebolton.swarmly
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        SWIFT_OBJC_BRIDGING_HEADER: Sources/TorrentBridge/kTorrent-Bridging-Header.h
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/TorrentBridge/Swarmly-Bridging-Header.h
         ENABLE_HARDENED_RUNTIME: YES
-        CODE_SIGN_ENTITLEMENTS: Sources/KTorrent/Resources/kTorrent.entitlements
+        CODE_SIGN_ENTITLEMENTS: Sources/Swarmly/Resources/Swarmly.entitlements
         CLANG_CXX_LANGUAGE_STANDARD: "c++17"
         CLANG_CXX_LIBRARY: "libc++"
         GCC_ENABLE_CPP_EXCEPTIONS: YES
@@ -80,17 +80,17 @@ targets:
           - -Wno-documentation
           - -Wno-comma
     info:
-      path: Sources/KTorrent/Resources/Info.plist
+      path: Sources/Swarmly/Resources/Info.plist
       properties:
-        CFBundleDisplayName: kTorrent
+        CFBundleDisplayName: Swarmly
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSHumanReadableCopyright: "© 2026 Kyle Bolton"
-        NSLocalNetworkUsageDescription: kTorrent streams video to AirPlay devices and finds peers on your local network.
+        NSLocalNetworkUsageDescription: Swarmly streams video to AirPlay devices and finds peers on your local network.
         # Sparkle: the feed lives in this repo; updates are verified against the EdDSA public key.
-        SUFeedURL: https://raw.githubusercontent.com/kylebolton/kTorrent/main/appcast.xml
+        SUFeedURL: https://raw.githubusercontent.com/kylebolton/Swarmly/main/appcast.xml
         SUPublicEDKey: jnuAe9Wb/I8fgl48M6n9iQxspo/o+Hv/8axT5hKbpLo=
         SUEnableAutomaticChecks: true
         SUScheduledCheckInterval: 86400
@@ -100,9 +100,9 @@ targets:
           - CFBundleURLName: BitTorrent Magnet Link
             CFBundleTypeRole: Viewer
             CFBundleURLSchemes: [magnet]
-          - CFBundleURLName: kTorrent Link
+          - CFBundleURLName: Swarmly Link
             CFBundleTypeRole: Viewer
-            CFBundleURLSchemes: [ktorrent]
+            CFBundleURLSchemes: [swarmly, ktorrent]
         CFBundleDocumentTypes:
           - CFBundleTypeName: BitTorrent File
             CFBundleTypeRole: Viewer
@@ -146,30 +146,30 @@ targets:
             echo "warning: Vendor/jackett missing — run scripts/fetch-jackett.sh (the app will download Jackett on first launch instead)"
           fi
 
-  kTorrentTests:
+  SwarmlyTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: Tests/KTorrentTests
+      - path: Tests/SwarmlyTests
     dependencies:
-      - target: kTorrent
+      - target: Swarmly
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: me.kylebolton.kTorrentTests
+        PRODUCT_BUNDLE_IDENTIFIER: me.kylebolton.swarmlyTests
         GENERATE_INFOPLIST_FILE: YES
         BUNDLE_LOADER: $(TEST_HOST)
-        TEST_HOST: $(BUILT_PRODUCTS_DIR)/kTorrent.app/Contents/MacOS/kTorrent
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Swarmly.app/Contents/MacOS/Swarmly
 
 schemes:
-  kTorrent:
+  Swarmly:
     build:
       targets:
-        kTorrent: all
-        kTorrentTests: [test]
+        Swarmly: all
+        SwarmlyTests: [test]
     run:
       config: Debug
     test:
       config: Debug
-      targets: [kTorrentTests]
+      targets: [SwarmlyTests]
     archive:
       config: Release

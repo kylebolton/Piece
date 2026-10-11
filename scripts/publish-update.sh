@@ -1,5 +1,5 @@
 #!/bin/bash
-# Publishes dist/kTorrent.zip as an auto-update:
+# Publishes dist/Swarmly.zip as an auto-update:
 #   1. bump MARKETING_VERSION / CURRENT_PROJECT_VERSION in project.yml
 #   2. scripts/release.sh
 #   3. scripts/publish-update.sh        (this script)
@@ -10,10 +10,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ZIP=dist/kTorrent.zip
+ZIP=dist/Swarmly.zip
 [ -f "$ZIP" ] || { echo "Run scripts/release.sh first."; exit 1; }
-VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" dist/kTorrent.app/Contents/Info.plist)
-BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" dist/kTorrent.app/Contents/Info.plist)
+VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" dist/Swarmly.app/Contents/Info.plist)
+BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" dist/Swarmly.app/Contents/Info.plist)
 REPO=$(git config --get remote.origin.url | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')
 BIN=$(find build/SourcePackages/artifacts -path "*Sparkle/bin" -type d | head -1)
 [ -n "$BIN" ] || { echo "Sparkle tools not found; build the project once first."; exit 1; }
@@ -21,14 +21,14 @@ BIN=$(find build/SourcePackages/artifacts -path "*Sparkle/bin" -type d | head -1
 # The feed only ever needs the newest version (each release keeps its own zip on GitHub), so rebuild it
 # from scratch: older entries would be rewritten to this release's download URL.
 rm -rf .updates appcast.xml && mkdir -p .updates
-cp "$ZIP" ".updates/kTorrent-$VERSION.zip"
+cp "$ZIP" ".updates/Swarmly-$VERSION.zip"
 "$BIN/generate_appcast" .updates --maximum-deltas 0 \
   --download-url-prefix "https://github.com/$REPO/releases/download/v$VERSION/" \
   -o appcast.xml
 echo "== appcast.xml updated for $VERSION (build $BUILD) =="
 
 if command -v gh >/dev/null; then
-  gh release create "v$VERSION" ".updates/kTorrent-$VERSION.zip" --repo "$REPO" \
-    --title "kTorrent $VERSION" --notes "kTorrent $VERSION" || echo "Release v$VERSION already exists or failed; upload the zip by hand."
+  gh release create "v$VERSION" ".updates/Swarmly-$VERSION.zip" --repo "$REPO" \
+    --title "Swarmly $VERSION" --notes "Swarmly $VERSION" || echo "Release v$VERSION already exists or failed; upload the zip by hand."
 fi
 echo "Now commit and push appcast.xml."
