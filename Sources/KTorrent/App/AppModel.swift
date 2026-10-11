@@ -72,6 +72,10 @@ final class AppModel {
     func start() {
         server.start()
         torrents.start()
+        // Get the built-in search indexers ready in the background so the first search is instant.
+        if !DemoTorrents.isEnabled, search.providers.contains(where: { $0.id == JackettManager.providerID && $0.isEnabled }) {
+            Task { try? await JackettManager.shared.ensureRunning() }
+        }
         if settings.notifyOnCompletion, !DemoTorrents.isEnabled {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
@@ -80,6 +84,7 @@ final class AppModel {
     func shutdown() {
         player.stop()
         audio.stop()
+        JackettManager.shared.stop()
         library.saveNow()
         torrents.shutdown()
         try? FileManager.default.removeItem(at: AppPaths.temporary)
