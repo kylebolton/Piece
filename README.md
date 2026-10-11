@@ -8,7 +8,7 @@ Requires macOS 14 or later. Universal (Apple Silicon and Intel).
 
 ## Download
 
-Get the latest `kTorrent.zip` from the [Releases page](https://github.com/kylebolton/kTorrent/releases/latest), unzip it and drag kTorrent to Applications. The app isn't notarized yet, so the first time macOS will block it: open **System Settings → Privacy & Security** and click **Open Anyway** (on macOS 14, right-click the app and choose **Open**). After that it updates itself (Settings → General → Updates).
+Get the latest `kTorrent-<version>.zip` from the [Releases page](https://github.com/kylebolton/kTorrent/releases/latest), unzip it and drag kTorrent to Applications. The app isn't notarized yet, so the first time macOS will block it: open **System Settings → Privacy & Security** and click **Open Anyway** (on macOS 14, right-click the app and choose **Open**). After that it updates itself (Settings → General → Updates).
 
 ## Features
 
