@@ -37,6 +37,15 @@ sign --entitlements "$ENTITLEMENTS" dist/kTorrent.app
 [ "$IDENTITY" = "-" ] || codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" dist/kTorrent.app
 
 ditto -c -k --keepParent dist/kTorrent.app dist/kTorrent.zip
+# With a notarytool keychain profile, notarize and staple so Gatekeeper opens the app without warnings:
+#   xcrun notarytool store-credentials kTorrent --apple-id you@example.com --team-id TEAMID   (app-specific password)
+#   NOTARY_PROFILE=kTorrent DEVELOPER_ID="Developer ID Application: …" scripts/release.sh
+if [ -n "${NOTARY_PROFILE:-}" ]; then
+  xcrun notarytool submit dist/kTorrent.zip --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple dist/kTorrent.app
+  rm dist/kTorrent.zip && ditto -c -k --keepParent dist/kTorrent.app dist/kTorrent.zip
+  spctl --assess --type execute -vv dist/kTorrent.app
+fi
 echo "== dist/kTorrent.app =="
 lipo -info dist/kTorrent.app/Contents/MacOS/kTorrent
 codesign --verify --deep --strict dist/kTorrent.app && echo "signature ok ($IDENTITY)"
