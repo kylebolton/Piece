@@ -102,7 +102,7 @@ final class AppModel {
         if !urls.contains(where: { $0.scheme?.lowercased() == "ktorrent" }) { selection = .transfers(.all) }
     }
 
-    /// `ktorrent://show/films`, `ktorrent://search?q=…`, `ktorrent://play?hash=…`, `ktorrent://inspect?hash=…`
+    /// `ktorrent://show/films`, `ktorrent://search?q=…`, `ktorrent://play?hash=…`, `ktorrent://stop`, `ktorrent://inspect?hash=…`
     private func handleDeepLink(_ url: URL) {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
@@ -126,6 +126,10 @@ final class AppModel {
                 if value("muted") == "1" { player.player.isMuted = true }
                 preview(torrent)
             }
+        case "stop":
+            player.stop()
+            player.player.isMuted = false
+            NSApp.windows.first { $0.identifier?.rawValue.hasPrefix("player") == true }?.close()
         case "inspect":
             if let hash = value("hash")?.lowercased() {
                 selection = .transfers(.all)
