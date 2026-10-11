@@ -133,6 +133,18 @@ targets:
               codesign --force --options runtime --sign "${EXPANDED_CODE_SIGN_IDENTITY:--}" "$DEST/$bin"
             fi
           done
+      - name: Embed Jackett
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          DEST="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Jackett"
+          rm -rf "$DEST"
+          if ls "$SRCROOT"/Vendor/jackett/Jackett-*.tar.gz >/dev/null 2>&1; then
+            mkdir -p "$DEST"
+            cp -f "$SRCROOT"/Vendor/jackett/Jackett-*.tar.gz "$DEST/"
+          else
+            echo "warning: Vendor/jackett missing — run scripts/fetch-jackett.sh (the app will download Jackett on first launch instead)"
+          fi
 
   kTorrentTests:
     type: bundle.unit-test

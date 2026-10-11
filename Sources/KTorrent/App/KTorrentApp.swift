@@ -1,8 +1,15 @@
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var termination: DispatchSourceSignal?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !AppPaths.isTesting else { return }
+        // A SIGTERM (system shutdown, `kill`) takes the normal quit path so the search indexer service stops too.
+        signal(SIGTERM, SIG_IGN)
+        termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        termination?.setEventHandler { NSApp.terminate(nil) }
+        termination?.resume()
         AppModel.shared.start()
     }
 

@@ -11,9 +11,10 @@ struct JackettIndexer: Identifiable, Hashable {
 }
 
 /// Runs [Jackett](https://github.com/Jackett/Jackett) (GPL-2.0) as a private background helper so the app can search
-/// hundreds of sites without the user installing or configuring anything. The pinned release is downloaded on first
-/// launch, checked against its SHA-256, and kept in the app's support folder; it listens on localhost only, never
-/// updates itself, and shuts down when kTorrent quits.
+/// hundreds of sites without the user installing or configuring anything. The pinned release ships inside the app
+/// (scripts/fetch-jackett.sh) and is unpacked into the support folder on first launch; builds without it download the
+/// same release instead, checked against its SHA-256. It listens on localhost only, never updates itself, and shuts
+/// down when kTorrent quits.
 @MainActor
 @Observable
 final class JackettManager {
@@ -23,8 +24,11 @@ final class JackettManager {
     nonisolated static let port = 19117
     nonisolated static let version = "v0.24.2816"
     nonisolated static let searchURL = "http://127.0.0.1:\(port)/api/v2.0/indexers/all/results/torznab/api"
-    /// Lawful-content indexers; everything else is one switch away in Sources.
-    nonisolated static let defaultIndexers = ["internetarchive", "linuxtracker"]
+    /// Indexers switched on out of the box; the rest are one switch away in Sources.
+    nonisolated static let defaultIndexers = [
+        "internetarchive", "linuxtracker", "thepiratebay", "1337x", "yts", "eztv", "nyaasi", "limetorrents",
+        "torrentgalaxyclone", "kickasstorrents-ws", "tokyotosho", "audiobookbay",
+    ]
 
     #if arch(arm64)
     private static let asset = (name: "Jackett.Binaries.macOSARM64.tar.gz",
@@ -43,6 +47,15 @@ final class JackettManager {
     }
 
     private(set) var state: State = .idle
+    /// The copy of Jackett embedded in the app for this Mac's architecture, if the build includes one.
+    private static var bundledArchive: URL? {
+        #if arch(arm64)
+        let arch = "arm64"
+        #else
+        let arch = "x86_64"
+        #endif
+        return Bundle.main.url(forResource: "Jackett-\(version)-\(arch)", withExtension: "tar.gz", subdirectory: "Jackett")
+    }
     private(set) var catalog: [JackettIndexer] = []
 
     @ObservationIgnored private var process: Process?
@@ -136,30 +149,50 @@ final class JackettManager {
     }
 
     private func install() async throws {
-        state = .downloading(0)
-        let url = URL(string: "https://github.com/Jackett/Jackett/releases/download/\(Self.version)/\(Self.asset.name)")!
-        let delegate = ProgressDelegate { [weak self] fraction in Task { @MainActor in self?.state = .downloading(fraction) } }
-        let (file, response) = try await URLSession.shared.download(from: url, delegate: delegate)
-        defer { try? FileManager.default.removeItem(at: file) }
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw JackettError.download }
-        guard try Self.sha256(of: file) == Self.asset.sha256 else { throw JackettError.checksum }
+        let archive: URL
+        var downloaded: URL?
+        if let bundled = Self.bundledArchive {
+            state = .starting
+            archive = bundled
+        } else {
+            state = .downloading(0)
+            let url = URL(string: "https://github.com/Jackett/Jackett/releases/download/\(Self.version)/\(Self.asset.name)")!
+            let delegate = ProgressDelegate { [weak self] fraction in Task { @MainActor in self?.state = .downloading(fraction) } }
+            let (file, response) = try await URLSession.shared.download(from: url, delegate: delegate)
+            downloaded = file
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw JackettError.download }
+            guard try Self.sha256(of: file) == Self.asset.sha256 else { throw JackettError.checksum }
+            archive = file
+        }
+        defer { if let downloaded { try? FileManager.default.removeItem(at: downloaded) } }
 
         let fm = FileManager.default
         let staging = root.appendingPathComponent("bin.tmp")
         try? fm.removeItem(at: staging)
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
-        let tar = Process()
-        tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-        tar.arguments = ["-xzf", file.path, "-C", staging.path]
-        try tar.run()
-        tar.waitUntilExit()
-        guard tar.terminationStatus == 0, fm.fileExists(atPath: staging.appendingPathComponent("Jackett/jackett").path)
-        else { throw JackettError.extract }
+        try await Self.untar(archive, into: staging)
+        guard fm.fileExists(atPath: staging.appendingPathComponent("Jackett/jackett").path) else { throw JackettError.extract }
         try Self.version.write(to: staging.appendingPathComponent(".version"), atomically: true, encoding: .utf8)
         let destination = root.appendingPathComponent("bin")
         try? fm.removeItem(at: destination)
         try fm.moveItem(at: staging, to: destination)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.path)
+    }
+
+    /// Unpacks off the main actor; the archive is about 120 MB once expanded.
+    private nonisolated static func untar(_ archive: URL, into folder: URL) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let tar = Process()
+                tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+                tar.arguments = ["-xzf", archive.path, "-C", folder.path]
+                do {
+                    try tar.run()
+                    tar.waitUntilExit()
+                    if tar.terminationStatus == 0 { continuation.resume() } else { continuation.resume(throwing: JackettError.extract) }
+                } catch { continuation.resume(throwing: error) }
+            }
+        }
     }
 
     private static func sha256(of file: URL) throws -> String {
