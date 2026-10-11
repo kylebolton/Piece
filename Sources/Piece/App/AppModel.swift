@@ -51,6 +51,7 @@ final class AppModel {
     let torrents: TorrentStore
     let library = LibraryStore()
     let tags = TagStore()
+    let compression: CompressionService
     let search = SearchStore()
     let server: StreamServer
     let player: PlayerModel
@@ -68,6 +69,7 @@ final class AppModel {
 
     private init() {
         torrents = TorrentStore(settings: settings)
+        compression = CompressionService(library: library)
         server = StreamServer(session: torrents.session)
         player = PlayerModel(server: server, torrents: torrents, library: library)
         audio = AudioPlayer(server: server, library: library)
@@ -77,6 +79,10 @@ final class AppModel {
     func start() {
         server.start()
         torrents.start()
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(45))
+            self?.packStaleItems()
+        }
         // Screenshots: `PIECE_DEMO_QUERY=…` opens Search with that query already run.
         if DemoTorrents.isEnabled, let query = ProcessInfo.processInfo.environment["PIECE_DEMO_QUERY"] {
             selection = .search
@@ -206,6 +212,13 @@ final class AppModel {
     }
 
     func play(_ media: MediaItem, fromStart: Bool = false) {
+        if media.isPacked {
+            // Packed items have to come back first; play as soon as they're restored.
+            compression.unpack([media]) { [weak self] in
+                if let restored = self?.library.item(media.id), !restored.isPacked { self?.play(restored, fromStart: fromStart) }
+            }
+            return
+        }
         guard media.fileExists else {
             torrents.lastError = "“\(media.title)” can't be found. It may have been moved or deleted."
             return
@@ -224,6 +237,14 @@ final class AppModel {
     }
 
     func play(tracks: [MediaItem], startingAt index: Int) {
+        if tracks.contains(where: \.isPacked) {
+            let ids = tracks.map(\.id)
+            compression.unpack(tracks) { [weak self] in
+                guard let self else { return }
+                self.play(tracks: ids.compactMap(self.library.item), startingAt: index)
+            }
+            return
+        }
         player.stop()
         audio.play(tracks.filter(\.fileExists), startingAt: index)
     }
@@ -235,6 +256,11 @@ final class AppModel {
             Task {
                 let files = await torrents.files(for: torrent.id)
                 library.importTorrent(name: torrent.name, savePath: torrent.savePath, files: files, hash: torrent.id)
+                if settings.compressOnComplete {
+                    // Give the engine a moment to release the files before rewriting them.
+                    try? await Task.sleep(for: .seconds(5))
+                    compression.compress(library.items.filter { $0.torrentHash == torrent.id })
+                }
             }
         }
         if settings.notifyOnCompletion {
@@ -245,6 +271,25 @@ final class AppModel {
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: torrent.id, content: content, trigger: nil))
         }
         NSApp.requestUserAttention(.informationalRequest)
+    }
+
+    /// Packing deletes the original files, so anything still being shared has to stop first.
+    func pack(_ items: [MediaItem]) {
+        let hashes = Set(items.compactMap(\.torrentHash))
+        for hash in hashes {
+            if let torrent = torrents.torrent(hash) { torrents.remove(torrent, deleteFiles: false) }
+        }
+        compression.pack(items)
+    }
+
+    /// Items that were last opened (or added) longer ago than the "auto-pack" setting.
+    func packStaleItems() {
+        let days = settings.autoPackAfterDays
+        guard days > 0 else { return }
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        let stale = library.items.filter { !$0.isPacked && $0.fileExists && ($0.lastPlayed ?? $0.dateAdded) < cutoff && $0.fileSize > 50_000_000
+            && ($0.torrentHash.flatMap { torrents.torrent($0) } == nil) }
+        if !stale.isEmpty { compression.pack(stale) }
     }
 
     func addToLibrary(_ torrent: Torrent) {

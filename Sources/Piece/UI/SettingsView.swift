@@ -7,6 +7,7 @@ struct SettingsView: View {
             NetworkSettings().tabItem { Label("Network", systemImage: "network") }
             SubtitleSettings().tabItem { Label("Subtitles", systemImage: "captions.bubble") }
             LibrarySettings().tabItem { Label("Library", systemImage: "books.vertical") }
+            StorageSettings().tabItem { Label("Storage", systemImage: "internaldrive") }
         }
         .frame(width: 520)
     }

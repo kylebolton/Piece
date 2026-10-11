@@ -236,6 +236,7 @@ struct SidebarView: View {
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
+                StorageSummary()
                 if let activity = app.library.activity {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.small)

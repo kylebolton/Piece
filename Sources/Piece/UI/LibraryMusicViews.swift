@@ -239,6 +239,8 @@ struct OtherLibraryView: View {
                 }
                 .contextMenu(forSelectionType: UUID.self) { ids in
                     Button("Show in Finder", systemImage: "folder") { reveal(ids, in: items) }
+                    TagMenu(targets: ids.map(\.uuidString))
+                    StorageMenu(itemIDs: Array(ids))
                     Divider()
                     Button("Remove from Library", systemImage: "minus.circle") { app.library.remove(ids, moveToTrash: false) }
                 } primaryAction: { ids in

@@ -108,6 +108,8 @@ struct FilmsView: View {
         Button("Fix Match…", systemImage: "wand.and.stars") { fixing = film }
         Button("Move to TV Shows", systemImage: "tv") { app.library.changeKind(of: film.id, to: .episode) }
         Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([film.url]) }
+        TagMenu(targets: [film.id.uuidString])
+        StorageMenu(itemIDs: [film.id])
         Divider()
         Button("Remove from Library", systemImage: "minus.circle") { app.library.remove([film.id], moveToTrash: false) }
         Button("Move to Trash", systemImage: "trash", role: .destructive) { app.library.remove([film.id], moveToTrash: true) }

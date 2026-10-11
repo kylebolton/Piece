@@ -24,6 +24,11 @@ struct MediaItem: Identifiable, Codable, Hashable {
     var isMatched = false
     var torrentHash: String?
 
+    // Storage: bytes saved by compression, and the archive holding this file if it has been packed.
+    var savedBytes: Int64?
+    var packedFile: String?
+    var packedBytes: Int64?
+
     // TV
     var showTitle: String?
     var season: Int?
@@ -43,6 +48,7 @@ struct MediaItem: Identifiable, Codable, Hashable {
     var lastPlayed: Date?
 
     var url: URL { URL(fileURLWithPath: path) }
+    var isPacked: Bool { packedFile != nil }
     var fileExists: Bool { FileManager.default.fileExists(atPath: path) }
 
     var artworkURL: URL? { artworkFile.map { AppPaths.artwork.appendingPathComponent($0) } }

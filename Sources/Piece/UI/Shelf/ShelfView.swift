@@ -19,6 +19,7 @@ struct ShelfEntry: Identifiable {
     let targets: [String]
     let progress: Double
     let isWatched: Bool
+    var isPacked = false
 }
 
 extension ShelfEntry {
@@ -53,7 +54,12 @@ extension ShelfEntry {
                                       dateAdded: album.tracks.map(\.dateAdded).max() ?? .distantPast,
                                       targets: album.tracks.map { $0.id.uuidString }, progress: 0, isWatched: true))
         }
-        return entries
+        return entries.map { entry in
+            var entry = entry
+            let ids = entry.targets.compactMap(UUID.init(uuidString:)).compactMap(library.item)
+            entry.isPacked = !ids.isEmpty && ids.allSatisfy(\.isPacked)
+            return entry
+        }
     }
 }
 
@@ -193,6 +199,7 @@ private struct ShelfRow: View {
                                 Button("Play", systemImage: "play.fill") { play(entry) }
                                 Divider()
                                 TagMenu(targets: entry.targets)
+                                StorageMenu(itemIDs: entry.targets.compactMap(UUID.init(uuidString:)))
                             }
                     }
                     Spacer(minLength: 0)
@@ -258,6 +265,18 @@ private struct ShelfItem: View {
             }
             .frame(width: width, height: height)
             .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+            .overlay(alignment: .topTrailing) {
+                if entry.isPacked {
+                    Image(systemName: "archivebox.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.white)
+                        .padding(5)
+                        .background(.black.opacity(0.6), in: Circle())
+                        .padding(5)
+                        .help("Packed — opens after unpacking")
+                }
+            }
+            .saturation(entry.isPacked ? 0.35 : 1)
             .overlay(alignment: .bottom) {
                 if entry.progress > 0.02, !entry.isWatched {
                     ProgressBar(value: entry.progress, tint: .white, height: 3).padding(6)

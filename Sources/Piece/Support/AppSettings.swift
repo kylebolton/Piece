@@ -21,6 +21,10 @@ final class AppSettings {
 
     var addToLibraryAutomatically: Bool { didSet { defaults.set(addToLibraryAutomatically, forKey: "addToLibrary") } }
     var notifyOnCompletion: Bool { didSet { defaults.set(notifyOnCompletion, forKey: "notifyOnCompletion") } }
+    /// Compress finished downloads with APFS transparent compression (stays playable in place).
+    var compressOnComplete: Bool { didSet { defaults.set(compressOnComplete, forKey: "compressOnComplete") } }
+    /// Pack items nobody has opened for this many days into archives; 0 = never.
+    var autoPackAfterDays: Int { didSet { defaults.set(autoPackAfterDays, forKey: "autoPackAfterDays") } }
     var hideAdultResults: Bool { didSet { defaults.set(hideAdultResults, forKey: "hideAdultResults") } }
     var showMenuBarItem: Bool { didSet { defaults.set(showMenuBarItem, forKey: "showMenuBarItem") } }
 
@@ -47,6 +51,7 @@ final class AppSettings {
             "addToLibrary": true,
             "notifyOnCompletion": true,
             "showMenuBarItem": true,
+            "compressOnComplete": true,
             "subtitleLanguages": [Locale.current.language.languageCode?.identifier ?? "en"],
             "autoLoadSubtitles": true,
             "subtitleFontScale": 1.0,
@@ -63,6 +68,8 @@ final class AppSettings {
         addToLibraryAutomatically = defaults.bool(forKey: "addToLibrary")
         notifyOnCompletion = defaults.bool(forKey: "notifyOnCompletion")
         showMenuBarItem = defaults.bool(forKey: "showMenuBarItem")
+        compressOnComplete = defaults.bool(forKey: "compressOnComplete")
+        autoPackAfterDays = defaults.integer(forKey: "autoPackAfterDays")
         hideAdultResults = defaults.bool(forKey: "hideAdultResults")
         subtitleLanguages = defaults.stringArray(forKey: "subtitleLanguages") ?? ["en"]
         autoLoadSubtitles = defaults.bool(forKey: "autoLoadSubtitles")
