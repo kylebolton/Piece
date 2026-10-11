@@ -71,6 +71,14 @@
 	<string>© 2026 Kyle Bolton</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>kTorrent streams video to AirPlay devices and finds peers on your local network.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/kylebolton/kTorrent/main/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>PLACEHOLDER_ED_KEY</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>

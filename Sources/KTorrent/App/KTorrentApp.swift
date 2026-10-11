@@ -91,8 +91,13 @@ private struct MenuBarContent: View {
 
 private struct AppCommands: Commands {
     var app: AppModel
+    @ObservedObject private var updater = Updater.shared
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { updater.checkForUpdates() }
+                .disabled(!updater.canCheck)
+        }
         CommandGroup(replacing: .newItem) {
             Button("Add Torrent…") { app.showAddSheet = true }
                 .keyboardShortcut("n")

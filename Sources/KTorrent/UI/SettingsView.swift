@@ -14,6 +14,7 @@ struct SettingsView: View {
 
 private struct GeneralSettings: View {
     @Environment(AppModel.self) private var app
+    @ObservedObject private var updater = Updater.shared
 
     var body: some View {
         @Bindable var settings = app.settings
@@ -35,6 +36,15 @@ private struct GeneralSettings: View {
             }
             Toggle("Notify me when a download finishes", isOn: $settings.notifyOnCompletion)
             Toggle("Show transfer speeds in the menu bar", isOn: $settings.showMenuBarItem)
+            Section("Updates") {
+                Toggle("Check for updates automatically", isOn: Binding(
+                    get: { updater.automaticallyChecks }, set: { updater.automaticallyChecks = $0 }))
+                Toggle("Download and install updates automatically", isOn: Binding(
+                    get: { updater.automaticallyDownloads }, set: { updater.automaticallyDownloads = $0 }))
+                    .disabled(!updater.automaticallyChecks)
+                Button("Check Now") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheck)
+            }
         }
         .formStyle(.grouped)
     }
