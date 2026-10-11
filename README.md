@@ -18,6 +18,7 @@ Get the latest `kTorrent-<version>.zip` from the [Releases page](https://github.
 - **AirPlay** — send any file to an Apple TV or AirPlay speaker, including while it downloads. Subtitles travel with the stream.
 - **Subtitles** — automatically matches subtitle files in the download and tracks embedded in the video, and searches OpenSubtitles by file hash and title. Timing offset, language preferences, drag-in subtitle files.
 - **Library** — finished downloads are sorted into Films, TV Shows (by season), Music (songs, albums, artists) and Other, with artwork and details from TMDB or Apple's catalogue. Sortable columns, filters, watched state and resume.
+- **Search indexers** — kTorrent runs [Jackett](https://github.com/Jackett/Jackett) privately in the background, so hundreds of public sites are searchable with no setup. The first launch downloads the pinned Jackett release (checked against its SHA-256); it listens on localhost only and quits with the app. Sources → Search indexers → Choose… switches individual sites on or off; only Internet Archive and Linux Tracker are on by default.
 - **Search** — one search across all your sources. Ships with Internet Archive and Linux Tracker. Add your own site by typing its address: kTorrent probes for a Torznab API (Jackett/Prowlarr), RSS feed, OpenSearch description or search form, tests it, and learns how to read the results.
 
 ## Building
@@ -35,6 +36,10 @@ scripts/release.sh        # universal release build → dist/kTorrent.app and di
 `xcodegen generate` creates `kTorrent.xcodeproj` if you'd rather work in Xcode.
 
 Releases are signed with a Developer ID and notarized by `scripts/release.sh`: set `DEVELOPER_ID` to your identity and either `NOTARY_PROFILE` (a `notarytool` keychain profile) or an App Store Connect API key in `~/.appstoreconnect/publish.env`. Without them it makes an ad-hoc signed build that only runs on your own Mac.
+
+## Third-party software
+
+Jackett is GPL-2.0 licensed. kTorrent doesn't modify or link it: it downloads the unmodified release from github.com/Jackett/Jackett and runs it as a separate process. libtorrent (BSD) and an LGPL ffmpeg build are bundled; Sparkle (MIT) handles updates.
 
 ## Screenshots and demo mode
 

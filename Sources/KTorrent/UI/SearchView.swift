@@ -214,6 +214,8 @@ struct SourcesView: View {
     @Environment(AppModel.self) private var app
     @State private var showAdd = false
     @State private var editing: SearchProvider?
+    @State private var showIndexers = false
+    private var jackett: JackettManager { .shared }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -246,9 +248,19 @@ struct SourcesView: View {
                                     .background(.quaternary, in: Capsule())
                                     .foregroundStyle(.secondary)
                             }
-                            Text(provider.url).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            if provider.id == JackettManager.providerID {
+                                Text(jackett.statusText).font(.caption)
+                                    .foregroundStyle(jackettFailed ? Color.red : Color.secondary).lineLimit(2)
+                            } else {
+                                Text(provider.url).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            }
                         }
                         Spacer()
+                        if provider.id == JackettManager.providerID {
+                            Button("Choose…") { showIndexers = true }
+                                .controlSize(.small)
+                                .disabled(jackett.state != .ready)
+                        }
                         if !provider.isBuiltIn {
                             Button("Edit") { editing = provider }
                                 .controlSize(.small)
@@ -272,6 +284,12 @@ struct SourcesView: View {
         }
         .sheet(isPresented: $showAdd) { AddSourceSheet() }
         .sheet(item: $editing) { EditSourceSheet(provider: $0) }
+        .sheet(isPresented: $showIndexers) { IndexersSheet() }
+    }
+
+    private var jackettFailed: Bool {
+        if case .failed = jackett.state { return true }
+        return false
     }
 
     private func symbol(for kind: SearchProvider.Kind) -> String {
@@ -439,5 +457,55 @@ struct EditSourceSheet: View {
         }
         .padding(22)
         .frame(width: 500)
+    }
+}
+
+
+/// Picks which of Jackett's public indexers the built-in "Search indexers" source searches.
+struct IndexersSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var filter = ""
+    private var jackett: JackettManager { .shared }
+
+    private var shown: [JackettIndexer] {
+        let text = filter.trimmingCharacters(in: .whitespaces)
+        return text.isEmpty ? jackett.catalog : jackett.catalog.filter {
+            $0.name.localizedCaseInsensitiveContains(text) || $0.summary.localizedCaseInsensitiveContains(text)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Search indexers").font(.title3.weight(.semibold))
+            Text("Pick the sites to search. Only turn on sites for content you have the right to download. Powered by Jackett (GPL-2.0, github.com/Jackett/Jackett), which kTorrent runs privately on your Mac.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            TextField("Filter", text: $filter)
+                .textFieldStyle(.roundedBorder)
+            List(shown) { indexer in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(indexer.name).font(.body.weight(.medium))
+                        Text(indexer.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    Spacer()
+                    Text(indexer.language).font(.caption).foregroundStyle(.secondary)
+                    Toggle(indexer.name, isOn: Binding(
+                        get: { indexer.isEnabled },
+                        set: { value in Task { await jackett.setIndexer(indexer.id, enabled: value) } }))
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .controlSize(.small)
+                }
+            }
+            .listStyle(.inset)
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 560, height: 520)
+        .task { await jackett.refreshCatalog() }
     }
 }

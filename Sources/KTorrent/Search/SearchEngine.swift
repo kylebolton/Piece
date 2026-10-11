@@ -13,6 +13,12 @@ enum SearchEngine {
         case .internetArchive:
             return try await internetArchive(query, name: provider.name)
         case .torznab:
+            var provider = provider
+            if provider.id == JackettManager.providerID {
+                // The built-in indexer service: make sure it's installed and running, then use its generated key.
+                try await JackettManager.shared.ensureRunning()
+                provider.apiKey = await JackettManager.shared.apiKey
+            }
             guard var components = URLComponents(string: provider.url) else { throw SearchError.badURL }
             var items = (components.queryItems ?? []).filter { !["t", "q", "apikey", "limit"].contains($0.name) }
             items += [URLQueryItem(name: "t", value: "search"), URLQueryItem(name: "q", value: query),
@@ -297,6 +303,9 @@ final class SearchStore {
                        kind: .internetArchive, url: "https://archive.org", isBuiltIn: true),
         SearchProvider(id: UUID(uuidString: "0A1C7C58-5B0B-4C1E-9C55-000000000002")!, name: "Linux Tracker",
                        kind: .html, url: "https://linuxtracker.org/torrents/?q={query}", isBuiltIn: true),
+        // Hundreds of sites through a private Jackett; see JackettManager.
+        SearchProvider(id: JackettManager.providerID, name: "Search indexers",
+                       kind: .torznab, url: JackettManager.searchURL, isBuiltIn: true),
     ]
 
     init() {
