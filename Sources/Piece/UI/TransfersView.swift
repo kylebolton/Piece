@@ -52,6 +52,7 @@ struct TransfersView: View {
             Button("Resume", systemImage: "play") { torrents.forEach(app.torrents.resume) }
             Button("Pause", systemImage: "pause") { torrents.forEach(app.torrents.pause) }
             Divider()
+            TagMenu(targets: torrents.map(\.id))
             Button("Show in Finder", systemImage: "folder") { app.torrents.revealInFinder(first) }
             Button("Copy Magnet Link", systemImage: "link") {
                 let links = torrents.compactMap(app.torrents.magnetLink).joined(separator: "\n")
@@ -99,11 +100,14 @@ struct TorrentRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 ProgressBar(value: torrent.phase == .fetchingMetadata ? 0 : torrent.progress, tint: torrent.phase.tint)
-                Text(torrent.statusLine)
-                    .font(.caption2)
-                    .foregroundStyle(torrent.phase == .error ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
-                    .monospacedDigit()
-                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    Text(torrent.statusLine)
+                        .font(.caption2)
+                        .foregroundStyle(torrent.phase == .error ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                    TagChips(target: torrent.id)
+                }
             }
 
             HStack(spacing: 2) {

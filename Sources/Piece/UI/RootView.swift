@@ -54,6 +54,8 @@ struct RootView: View {
     private var detail: some View {
         switch app.selection ?? .transfers(.all) {
         case .transfers(let filter): TransfersView(filter: filter)
+        case .shelf: ShelfView()
+        case .tag(let id): TagPageView(tagID: id)
         case .films: FilmsView()
         case .tv: TVView()
         case .music: MusicView()
@@ -66,6 +68,7 @@ struct RootView: View {
     /// Library and search screens carry their own large heading, so the toolbar stays quiet there.
     private var title: String {
         if case .transfers(let filter) = app.selection ?? .transfers(.all) { return filter.title }
+        if case .tag(let id) = app.selection, let tag = app.tags.tag(id) { return tag.name }
         return "Piece"
     }
 
@@ -182,10 +185,48 @@ struct SidebarView: View {
                 }
             }
             Section("Library") {
+                Label("Shelf", systemImage: "books.vertical").badge(app.library.items.filter { $0.kind != .track }.count).tag(SidebarItem.shelf)
                 Label("Films", systemImage: "film").badge(app.library.count(of: .film)).tag(SidebarItem.films)
                 Label("TV Shows", systemImage: "tv").badge(app.library.shows.count).tag(SidebarItem.tv)
                 Label("Music", systemImage: "music.note").badge(app.library.count(of: .track)).tag(SidebarItem.music)
                 Label("Other", systemImage: "shippingbox").badge(app.library.count(of: .other)).tag(SidebarItem.other)
+            }
+            Section {
+                ForEach(app.tags.tags) { tag in
+                    Label {
+                        Text(tag.name)
+                    } icon: {
+                        Image(systemName: "circle.fill").foregroundStyle(tag.color).imageScale(.small)
+                    }
+                    .badge(app.tags.count(of: tag))
+                    .tag(SidebarItem.tag(tag.id))
+                    .contextMenu {
+                        Button("Rename…", systemImage: "pencil") {
+                            if let name = TagPrompt.ask(title: "Rename Tag", initial: tag.name) { app.tags.rename(tag, to: name) }
+                        }
+                        Menu("Color", systemImage: "paintpalette") {
+                            ForEach(Array(Tag.palette.enumerated()), id: \.offset) { index, color in
+                                Button { app.tags.recolor(tag, to: index) } label: { Label("Color \(index + 1)", systemImage: "circle.fill").foregroundStyle(color) }
+                            }
+                        }
+                        Divider()
+                        Button("Delete Tag", systemImage: "trash", role: .destructive) {
+                            if app.selection == .tag(tag.id) { app.selection = .shelf }
+                            app.tags.delete(tag)
+                        }
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Tags")
+                    Spacer()
+                    Button {
+                        if let name = TagPrompt.ask() { app.tags.create(name: name) }
+                    } label: { Image(systemName: "plus") }
+                        .buttonStyle(.plain)
+                        .help("New tag")
+                        .accessibilityLabel("New tag")
+                }
             }
             Section("Discover") {
                 Label("Search", systemImage: "magnifyingglass").tag(SidebarItem.search)

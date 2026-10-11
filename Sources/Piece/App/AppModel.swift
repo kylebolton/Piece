@@ -4,7 +4,9 @@ import UserNotifications
 
 enum SidebarItem: Hashable {
     case transfers(TransferFilter)
+    case shelf
     case films, tv, music, other
+    case tag(UUID)
     case search, sources
 }
 
@@ -48,12 +50,15 @@ final class AppModel {
     let settings = AppSettings.shared
     let torrents: TorrentStore
     let library = LibraryStore()
+    let tags = TagStore()
     let search = SearchStore()
     let server: StreamServer
     let player: PlayerModel
     let audio: AudioPlayer
 
     var selection: SidebarItem? = .transfers(.all)
+    /// The shelf's search box; items that don't match fade back.
+    var shelfQuery = ""
     var selectedTorrents: Set<String> = []
     var showInspector = false
     var showAddSheet = false
@@ -92,6 +97,7 @@ final class AppModel {
         audio.stop()
         JackettManager.shared.stop()
         library.saveNow()
+        tags.saveNow()
         torrents.shutdown()
         try? FileManager.default.removeItem(at: AppPaths.temporary)
     }
