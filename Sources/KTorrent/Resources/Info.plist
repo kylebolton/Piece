@@ -76,7 +76,7 @@
 	<key>SUFeedURL</key>
 	<string>https://raw.githubusercontent.com/kylebolton/kTorrent/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>PLACEHOLDER_ED_KEY</string>
+	<string>jnuAe9Wb/I8fgl48M6n9iQxspo/o+Hv/8axT5hKbpLo=</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
 	<key>UTImportedTypeDeclarations</key>

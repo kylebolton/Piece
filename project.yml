@@ -91,7 +91,7 @@ targets:
         NSLocalNetworkUsageDescription: kTorrent streams video to AirPlay devices and finds peers on your local network.
         # Sparkle: the feed lives in this repo; updates are verified against the EdDSA public key.
         SUFeedURL: https://raw.githubusercontent.com/kylebolton/kTorrent/main/appcast.xml
-        SUPublicEDKey: PLACEHOLDER_ED_KEY
+        SUPublicEDKey: jnuAe9Wb/I8fgl48M6n9iQxspo/o+Hv/8axT5hKbpLo=
         SUEnableAutomaticChecks: true
         SUScheduledCheckInterval: 86400
         NSAppTransportSecurity:

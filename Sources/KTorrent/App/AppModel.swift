@@ -72,7 +72,7 @@ final class AppModel {
     func start() {
         server.start()
         torrents.start()
-        if settings.notifyOnCompletion {
+        if settings.notifyOnCompletion, !DemoTorrents.isEnabled {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
     }
