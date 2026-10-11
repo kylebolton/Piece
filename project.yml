@@ -10,6 +10,9 @@ packages:
   SwiftSoup:
     url: https://github.com/scinfu/SwiftSoup
     from: 2.7.0
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.6.4
 
 settings:
   base:
@@ -33,6 +36,7 @@ targets:
       - path: Sources/TorrentBridge
     dependencies:
       - package: SwiftSoup
+      - package: Sparkle
       - sdk: libc++.tbd
       - sdk: CoreFoundation.framework
       - sdk: SystemConfiguration.framework
@@ -45,6 +49,7 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         SWIFT_OBJC_BRIDGING_HEADER: Sources/TorrentBridge/kTorrent-Bridging-Header.h
         ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: Sources/KTorrent/Resources/kTorrent.entitlements
         CLANG_CXX_LANGUAGE_STANDARD: "c++17"
         CLANG_CXX_LIBRARY: "libc++"
         GCC_ENABLE_CPP_EXCEPTIONS: YES
@@ -84,6 +89,11 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSHumanReadableCopyright: "© 2026 Kyle Bolton"
         NSLocalNetworkUsageDescription: kTorrent streams video to AirPlay devices and finds peers on your local network.
+        # Sparkle: the feed lives in this repo; updates are verified against the EdDSA public key.
+        SUFeedURL: https://raw.githubusercontent.com/kylebolton/kTorrent/main/appcast.xml
+        SUPublicEDKey: PLACEHOLDER_ED_KEY
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 86400
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         CFBundleURLTypes:
