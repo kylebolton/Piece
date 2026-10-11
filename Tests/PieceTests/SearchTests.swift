@@ -152,4 +152,60 @@ final class SearchTests: XCTestCase {
         XCTAssertEqual(try SearchEngine.url(from: "https://x.org/search/{query}/1/", query: "a/b").absoluteString,
                        "https://x.org/search/a%2Fb/1/")
     }
+
+    // MARK: - Sorting and filtering
+
+    private func result(_ title: String, seeds: Int?, size: Int64? = nil, hash: String? = nil, provider: String = "A") -> SearchResult {
+        SearchResult(title: title, magnet: "magnet:?xt=urn:btih:\(hash ?? title)", torrentURL: nil, detailsURL: nil, size: size,
+                     seeders: seeds, leechers: 0, date: nil, provider: provider, infoHash: hash)
+    }
+
+    func testBestMatchPrefersTheThingOverPopularNoise() {
+        let results = [
+            result("Random Compilation with debian inside 2019", seeds: 900),
+            result("Debian 12 netinst", seeds: 40),
+            result("Debian 12 netinst dead", seeds: 0),
+        ]
+        let sorted = SearchRefine.sort(results, by: .bestMatch, ascending: false, query: "debian 12")
+        XCTAssertEqual(sorted.first?.title, "Debian 12 netinst")
+        // A dead exact match still outranks a popular title that merely mentions the word.
+        XCTAssertEqual(sorted.map(\.title), ["Debian 12 netinst", "Debian 12 netinst dead", "Random Compilation with debian inside 2019"])
+    }
+
+    func testSortDirections() {
+        let results = [result("b", seeds: 1), result("a", seeds: 5), result("c", seeds: 3)]
+        XCTAssertEqual(SearchRefine.sort(results, by: .seeds, ascending: false, query: "").map(\.title), ["a", "c", "b"])
+        XCTAssertEqual(SearchRefine.sort(results, by: .seeds, ascending: true, query: "").map(\.title), ["b", "c", "a"])
+        XCTAssertEqual(SearchRefine.sort(results, by: .name, ascending: false, query: "").map(\.title), ["a", "b", "c"])
+        XCTAssertEqual(SearchRefine.sort(results, by: .name, ascending: true, query: "").map(\.title), ["c", "b", "a"])
+    }
+
+    func testQualityParsing() {
+        XCTAssertEqual(result("Film.2023.2160p.UHD.BluRay.x265.HDR", seeds: 1).qualities, [.uhd, .hdr, .hevc])
+        XCTAssertEqual(result("Film 720p WEB", seeds: 1).qualities, [.hd])
+        XCTAssertTrue(result("Plain title", seeds: 1).qualities.isEmpty)
+    }
+
+    func testFilters() {
+        let gb: Int64 = 1_073_741_824
+        let results = [
+            result("Film 1080p", seeds: 50, size: 3 * gb), result("Film 2160p", seeds: 2, size: 30 * gb),
+            result("Film 1080p small", seeds: 0, size: gb / 2),
+        ]
+        XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(minSeeds: 5)).count, 1)
+        XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(size: .huge)).map(\.title), ["Film 2160p"])
+        XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(qualities: [.fullHD])).count, 2)
+        XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter()).count, 3)
+    }
+
+    func testDuplicatesKeepTheBestSeeded() {
+        let results = [
+            result("Same Thing", seeds: 3, hash: "ABC"), result("Same Thing (mirror)", seeds: 30, hash: "abc"),
+            result("Other", seeds: 1, size: 5), result("OTHER", seeds: 9, size: 5),
+        ]
+        let deduped = SearchRefine.dedupe(results)
+        XCTAssertEqual(deduped.count, 2)
+        XCTAssertEqual(deduped.first?.seeders, 30)
+        XCTAssertEqual(deduped.last?.seeders, 9)
+    }
 }

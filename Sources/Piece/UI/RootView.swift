@@ -185,13 +185,19 @@ struct SidebarView: View {
                 }
             }
             Section("Library") {
-                Label("Shelf", systemImage: "books.vertical").badge(app.library.items.filter { $0.kind != .track }.count).tag(SidebarItem.shelf)
+                Label("Shelf", systemImage: "books.vertical").badge(app.library.films.count + app.library.shows.count).tag(SidebarItem.shelf)
                 Label("Films", systemImage: "film").badge(app.library.count(of: .film)).tag(SidebarItem.films)
                 Label("TV Shows", systemImage: "tv").badge(app.library.shows.count).tag(SidebarItem.tv)
                 Label("Music", systemImage: "music.note").badge(app.library.count(of: .track)).tag(SidebarItem.music)
                 Label("Other", systemImage: "shippingbox").badge(app.library.count(of: .other)).tag(SidebarItem.other)
             }
             Section {
+                if app.tags.tags.isEmpty {
+                    Text("Add a tag with +")
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                        .selectionDisabled()
+                }
                 ForEach(app.tags.tags) { tag in
                     Label {
                         Text(tag.name)
@@ -222,11 +228,17 @@ struct SidebarView: View {
                     Spacer()
                     Button {
                         if let name = TagPrompt.ask() { app.tags.create(name: name) }
-                    } label: { Image(systemName: "plus") }
-                        .buttonStyle(.plain)
-                        .help("New tag")
-                        .accessibilityLabel("New tag")
+                    } label: {
+                        Image(systemName: "plus")
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("New tag")
+                    .accessibilityLabel("New tag")
                 }
+                // Keep clear of the sidebar's rounded edge.
+                .padding(.trailing, 10)
             }
             Section("Discover") {
                 Label("Search", systemImage: "magnifyingglass").tag(SidebarItem.search)

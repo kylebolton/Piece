@@ -2,7 +2,15 @@ import SwiftUI
 
 struct SearchView: View {
     @Environment(AppModel.self) private var app
-    @State private var sortOrder = [KeyPathComparator(\SearchResult.sortSeeders, order: .reverse)]
+    @AppStorage("searchSort") private var sort = SearchSort.bestMatch
+    @AppStorage("searchAscending") private var ascending = false
+    @AppStorage("searchMinSeeds") private var minSeeds = 0
+    @AppStorage("searchSize") private var sizeBand = SizeBand.any
+    @AppStorage("searchHideDuplicates") private var hideDuplicates = false
+    @AppStorage("searchFiltersShown") private var filtersShown = false
+    @State private var qualities: Set<Quality> = []
+    /// Set when a column header is clicked; cleared when the Sort menu is used.
+    @State private var columnOrder: [KeyPathComparator<SearchResult>] = []
     @State private var selection: Set<String> = []
     @State private var added: Set<String> = []
     @State private var resolving: Set<String> = []
@@ -13,7 +21,12 @@ struct SearchView: View {
     var body: some View {
         @Bindable var store = app.search
         let hideAdult = AppSettings.shared.hideAdultResults
-        let results = store.results.filter { !hideAdult || !$0.looksAdult }.sorted(using: sortOrder)
+        let available = store.results.filter { !hideAdult || !$0.looksAdult }
+        let filter = SearchFilter(minSeeds: minSeeds, size: sizeBand, qualities: qualities, hideDuplicates: hideDuplicates)
+        let filtered = SearchRefine.filter(available, with: filter)
+        let results = columnOrder.isEmpty
+            ? SearchRefine.sort(filtered, by: sort, ascending: ascending, query: store.query)
+            : filtered.sorted(using: columnOrder)
         VStack(spacing: 0) {
             VStack(spacing: 12) {
                 HStack(spacing: 10) {
@@ -63,7 +76,9 @@ struct SearchView: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)
-            .padding(.bottom, 12)
+            .padding(.bottom, 10)
+
+            if !store.results.isEmpty { refineBar(shown: results.count, total: available.count, filter: filter) }
 
             Divider()
 
@@ -85,7 +100,7 @@ struct SearchView: View {
                                message: "Nothing matched “\(store.query)”. Check the spelling or enable more sources.")
                 }
             } else {
-                Table(results, selection: $selection, sortOrder: $sortOrder) {
+                Table(results, selection: $selection, sortOrder: $columnOrder) {
                     TableColumn("Name", value: \.title) { result in
                         HStack(spacing: 8) {
                             Button {
@@ -147,7 +162,9 @@ struct SearchView: View {
                 }
 
                 HStack {
-                    Text("\(results.count) result\(results.count == 1 ? "" : "s")")
+                    Text(results.count == available.count
+                         ? "\(results.count) result\(results.count == 1 ? "" : "s")"
+                         : "\(results.count) of \(available.count) results")
                     if !store.failures.isEmpty {
                         Text("·")
                         Label("\(store.failures.keys.sorted().joined(separator: ", ")) didn't respond", systemImage: "exclamationmark.triangle")
@@ -163,6 +180,91 @@ struct SearchView: View {
             }
         }
         .onAppear { fieldFocused = true }
+    }
+
+    // MARK: - Sort and filter
+
+    private func refineBar(shown: Int, total: Int, filter: SearchFilter) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Menu {
+                    ForEach(SearchSort.allCases) { option in
+                        Button {
+                            columnOrder = []
+                            if sort == option { ascending.toggle() } else {
+                                sort = option
+                                ascending = false
+                            }
+                        } label: {
+                            if columnOrder.isEmpty, sort == option { Label(option.rawValue, systemImage: "checkmark") } else { Text(option.rawValue) }
+                        }
+                    }
+                } label: {
+                    Label(columnOrder.isEmpty ? "Sort: \(sort.rawValue)" : "Sort: Custom", systemImage: "arrow.up.arrow.down")
+                }
+                .menuStyle(.button)
+                .fixedSize()
+
+                Button {
+                    columnOrder = []
+                    ascending.toggle()
+                } label: {
+                    Image(systemName: ascending ? "arrow.up" : "arrow.down")
+                }
+                .help(ascending ? "Ascending — click for descending" : "Descending — click for ascending")
+                .accessibilityLabel(ascending ? "Ascending" : "Descending")
+
+                Button {
+                    withAnimation(.smooth(duration: 0.2)) { filtersShown.toggle() }
+                } label: {
+                    Label(filter.isActive ? "Filters ●" : "Filters", systemImage: "line.3.horizontal.decrease.circle")
+                }
+
+                Spacer()
+                if filter.isActive {
+                    Text("\(shown) of \(total)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    Button("Reset") {
+                        minSeeds = 0
+                        sizeBand = .any
+                        qualities = []
+                        hideDuplicates = false
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
+            }
+            .controlSize(.small)
+
+            if filtersShown {
+                HStack(spacing: 12) {
+                    Picker("Seeds", selection: $minSeeds) {
+                        Text("Any seeds").tag(0)
+                        Text("1+ seeds").tag(1)
+                        Text("5+ seeds").tag(5)
+                        Text("20+ seeds").tag(20)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    Picker("Size", selection: $sizeBand) {
+                        ForEach(SizeBand.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    ForEach(Quality.allCases) { quality in
+                        Toggle(quality.rawValue, isOn: Binding(
+                            get: { qualities.contains(quality) },
+                            set: { if $0 { qualities.insert(quality) } else { qualities.remove(quality) } }))
+                            .toggleStyle(.button)
+                    }
+                    Toggle("Hide duplicates", isOn: $hideDuplicates)
+                    Spacer(minLength: 0)
+                }
+                .controlSize(.small)
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 10)
     }
 
     private func download(_ result: SearchResult) {

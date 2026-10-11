@@ -5,7 +5,6 @@ struct ShelfEntry: Identifiable {
     enum Source {
         case film(MediaItem)
         case show(Show)
-        case album(Album)
     }
 
     let id: String
@@ -16,6 +15,8 @@ struct ShelfEntry: Identifiable {
     let source: Source
     let document: SearchDocument
     let dateAdded: Date
+    let year: Int
+    let rating: Double
     let targets: [String]
     let progress: Double
     let isWatched: Bool
@@ -36,7 +37,7 @@ extension ShelfEntry {
         for film in library.films {
             entries.append(ShelfEntry(id: "film-\(film.id)", title: film.title, subtitle: film.yearText, artwork: film.artworkURL,
                                       symbol: "film", source: .film(film), document: document(id: film.id.uuidString, members: [film], extra: ""),
-                                      dateAdded: film.dateAdded, targets: [film.id.uuidString], progress: film.watchedFraction,
+                                      dateAdded: film.dateAdded, year: film.sortYear, rating: film.sortRating, targets: [film.id.uuidString], progress: film.watchedFraction,
                                       isWatched: film.isWatched))
         }
         for show in library.shows {
@@ -44,15 +45,9 @@ extension ShelfEntry {
             entries.append(ShelfEntry(id: "show-\(show.id)", title: show.title, subtitle: "\(count) episode\(count == 1 ? "" : "s")",
                                       artwork: show.artworkURL, symbol: "tv", source: .show(show),
                                       document: document(id: show.id, members: show.episodes, extra: show.title),
-                                      dateAdded: show.dateAdded, targets: show.episodes.map { $0.id.uuidString }, progress: 0,
+                                      dateAdded: show.dateAdded, year: show.year ?? 0,
+                                      rating: show.episodes.map(\.sortRating).max() ?? 0, targets: show.episodes.map { $0.id.uuidString }, progress: 0,
                                       isWatched: show.unwatchedCount == 0))
-        }
-        for album in library.albums {
-            entries.append(ShelfEntry(id: "album-\(album.id)", title: album.title, subtitle: album.artist, artwork: album.artworkURL,
-                                      symbol: "music.note", source: .album(album),
-                                      document: document(id: album.id, members: album.tracks, extra: "\(album.title) \(album.artist)"),
-                                      dateAdded: album.tracks.map(\.dateAdded).max() ?? .distantPast,
-                                      targets: album.tracks.map { $0.id.uuidString }, progress: 0, isWatched: true))
         }
         return entries.map { entry in
             var entry = entry
@@ -65,10 +60,15 @@ extension ShelfEntry {
 
 /// An Apple Books–style library: everything standing on wooden shelves. Searching dims whatever doesn't match,
 /// and the matches slide to the front shelf.
+enum ShelfSort: String, CaseIterable {
+    case added = "Date Added", title = "Title", year = "Year", rating = "Rating", unwatched = "Unwatched First"
+}
+
 struct ShelfView: View {
     @Environment(AppModel.self) private var app
     var tag: Tag?
 
+    @AppStorage("shelfSort") private var sort = ShelfSort.added
     @State private var detail: MediaItem?
     @State private var openShow: Show?
 
@@ -81,6 +81,10 @@ struct ShelfView: View {
         let entries = visibleEntries(query: query)
         VStack(spacing: 0) {
             ContentHeader(title: tag?.name ?? "Shelf", subtitle: entries.isEmpty ? nil : "\(entries.count)") {
+                Picker("Sort by", selection: $sort) {
+                    ForEach(ShelfSort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .fixedSize()
                 ShelfSearchField(text: $app.shelfQuery)
                 LibraryMenu()
             }
@@ -96,10 +100,10 @@ struct ShelfView: View {
                         shelves(entries, query: query, width: proxy.size.width)
                     }
                 }
-                .background(ShelfBackdrop())
                 if !query.isEmpty { searchFooter(entries: entries, query: query) }
             }
         }
+        .background(ShelfBackdrop().ignoresSafeArea())
         .sheet(item: $detail) { MediaDetailSheet(itemID: $0.id) }
         .sheet(item: $openShow) { show in
             ShowDetailView(show: show) { openShow = nil }.frame(minWidth: 760, minHeight: 520)
@@ -112,7 +116,13 @@ struct ShelfView: View {
             let tagged = app.tags.targets(with: tag)
             all = all.filter { entry in entry.targets.contains(where: tagged.contains) }
         }
-        all.sort { $0.dateAdded > $1.dateAdded }
+        switch sort {
+        case .added: all.sort { $0.dateAdded > $1.dateAdded }
+        case .title: all.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case .year: all.sort { ($0.year, $1.title) > ($1.year, $0.title) }
+        case .rating: all.sort { $0.rating > $1.rating }
+        case .unwatched: all.sort { ($0.isWatched ? 1 : 0, -$0.dateAdded.timeIntervalSince1970) < ($1.isWatched ? 1 : 0, -$1.dateAdded.timeIntervalSince1970) }
+        }
         guard !query.isEmpty else { return all }
         // Matches first, in their usual order, then the dimmed rest.
         let hit = all.filter { SearchIndex.matches($0.document, query) }
@@ -121,9 +131,9 @@ struct ShelfView: View {
     }
 
     private func shelves(_ entries: [ShelfEntry], query: SearchQuery, width: CGFloat) -> some View {
-        let perRow = max(1, Int((width - 48 + gap) / (itemWidth + gap)))
+        let perRow = max(1, Int((width - 56 + gap) / (itemWidth + gap)))
         let rows = stride(from: 0, to: entries.count, by: perRow).map { Array(entries[$0..<min($0 + perRow, entries.count)]) }
-        return VStack(spacing: 30) {
+        return VStack(spacing: 36) {
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 ShelfRow(entries: row, query: query, itemWidth: itemWidth, gap: gap) { entry in
                     open(entry)
@@ -132,8 +142,9 @@ struct ShelfView: View {
                 }
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 26)
+        .padding(.horizontal, 28)
+        .padding(.top, 34)
+        .padding(.bottom, 30)
         .animation(.smooth(duration: 0.45), value: entries.map(\.id))
         .animation(.smooth(duration: 0.3), value: query)
     }
@@ -161,7 +172,6 @@ struct ShelfView: View {
         switch entry.source {
         case .film(let item): detail = item
         case .show(let show): openShow = show
-        case .album: app.selection = .music
         }
     }
 
@@ -171,7 +181,6 @@ struct ShelfView: View {
         case .show(let show):
             let ordered = show.episodes.sorted { ($0.season ?? 0, $0.episode ?? 0) < ($1.season ?? 0, $1.episode ?? 0) }
             if let next = ordered.first(where: { !$0.isWatched }) ?? ordered.first { app.play(next) }
-        case .album(let album): app.play(tracks: album.tracks.sorted { $0.sortTrack < $1.sortTrack }, startingAt: 0)
         }
     }
 }
@@ -204,8 +213,9 @@ private struct ShelfRow: View {
                     }
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 6)
-                .padding(.bottom, 10)
+                .padding(.horizontal, 8)
+                // The plank's top face is ShelfPlank.faceHeight tall; covers stand on it, not behind it.
+                .padding(.bottom, ShelfPlank.lipHeight + 4)
             }
             HStack(alignment: .top, spacing: gap) {
                 ForEach(entries) { entry in
@@ -219,8 +229,8 @@ private struct ShelfRow: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 6)
-            .padding(.top, 8)
+            .padding(.horizontal, 8)
+            .padding(.top, 12)
         }
     }
 }
@@ -236,10 +246,8 @@ private struct ShelfItem: View {
     @State private var isHovering = false
     @State private var tilt = CGSize.zero
 
-    private var isSquare: Bool { if case .album = entry.source { true } else { false } }
-
     var body: some View {
-        let height = isSquare ? width : width * 1.5
+        let height = width * 1.5
         Button(action: open) {
             ZStack {
                 ArtworkView(url: entry.artwork, symbol: entry.symbol, cornerRadius: 3, maxPixel: 400)
@@ -308,24 +316,34 @@ private struct ShelfItem: View {
     }
 }
 
-/// A wooden plank with a lit front edge and a shadow beneath it.
+/// A wooden plank seen from slightly above: a lit top face the covers stand on, a front lip, and a shadow under it.
 private struct ShelfPlank: View {
+    static let faceHeight: CGFloat = 8
+    static let lipHeight: CGFloat = 14
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        let dark = scheme == .dark
         VStack(spacing: 0) {
             Spacer(minLength: 0)
+            // Top face
+            LinearGradient(colors: dark ? [Color(red: 0.42, green: 0.28, blue: 0.17), Color(red: 0.3, green: 0.19, blue: 0.11)]
+                                        : [Color(red: 0.84, green: 0.66, blue: 0.46), Color(red: 0.74, green: 0.55, blue: 0.36)],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: Self.faceHeight)
+            // Front lip
             ZStack(alignment: .top) {
-                LinearGradient(colors: scheme == .dark ? [Color(red: 0.32, green: 0.21, blue: 0.13), Color(red: 0.2, green: 0.12, blue: 0.07)]
-                                                       : [Color(red: 0.72, green: 0.52, blue: 0.34), Color(red: 0.56, green: 0.38, blue: 0.23)],
+                LinearGradient(colors: dark ? [Color(red: 0.3, green: 0.19, blue: 0.11), Color(red: 0.17, green: 0.1, blue: 0.06)]
+                                            : [Color(red: 0.62, green: 0.44, blue: 0.28), Color(red: 0.5, green: 0.34, blue: 0.2)],
                                startPoint: .top, endPoint: .bottom)
-                Rectangle().fill(.white.opacity(scheme == .dark ? 0.12 : 0.35)).frame(height: 1)
+                Rectangle().fill(.white.opacity(dark ? 0.14 : 0.4)).frame(height: 1)
             }
-            .frame(height: 14)
-            .clipShape(RoundedRectangle(cornerRadius: 2))
-            .shadow(color: .black.opacity(0.45), radius: 8, y: 6)
+            .frame(height: Self.lipHeight)
         }
-        .frame(height: 24)
+        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+        .shadow(color: .black.opacity(dark ? 0.55 : 0.3), radius: 10, y: 8)
+        .frame(height: Self.faceHeight + Self.lipHeight)
+        .padding(.top, 0)
     }
 }
 
