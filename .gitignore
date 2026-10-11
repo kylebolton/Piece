@@ -8,5 +8,5 @@ xcuserdata/
 .swiftpm/
 .build/
 dist/
-Sources/Swarmly/Support/BuiltInKeys.swift
+Sources/Piece/Support/BuiltInKeys.swift
 .updates/

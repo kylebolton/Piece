@@ -57,7 +57,7 @@
 
 namespace {
 
-NSString *const KTErrorDomain = @"Swarmly.TorrentBridge";
+NSString *const KTErrorDomain = @"Piece.TorrentBridge";
 
 NSString *toNS(const std::string &s) {
     NSString *r = [[NSString alloc] initWithBytes:s.data() length:s.size() encoding:NSUTF8StringEncoding];
@@ -104,7 +104,7 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     lt::settings_pack p;
     p.set_int(lt::settings_pack::alert_mask,
               lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage);
-    p.set_str(lt::settings_pack::user_agent, "Swarmly/1.0 libtorrent/2.0");
+    p.set_str(lt::settings_pack::user_agent, "Piece/1.0 libtorrent/2.0");
     p.set_str(lt::settings_pack::peer_fingerprint, lt::generate_fingerprint("KT", 1, 0, 0, 0));
     std::string port = std::to_string(s.listenPort);
     p.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:" + port + ",[::]:" + port);
@@ -325,7 +325,7 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     }
 }
 
-- (void)rechecSwarmly:(NSString *)infoHash {
+- (void)recheck:(NSString *)infoHash {
     // libtorrent throws when a handle has gone away; never let that unwind into Swift.
     try {
         lt::torrent_handle h;
