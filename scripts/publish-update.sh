@@ -18,10 +18,11 @@ REPO=$(git config --get remote.origin.url | sed -E 's#(git@github.com:|https://g
 BIN=$(find build/SourcePackages/artifacts -path "*Sparkle/bin" -type d | head -1)
 [ -n "$BIN" ] || { echo "Sparkle tools not found; build the project once first."; exit 1; }
 
-# generate_appcast reads every archive in the folder, so keep older releases there between runs.
-mkdir -p .updates
+# The feed only ever needs the newest version (each release keeps its own zip on GitHub), so rebuild it
+# from scratch: older entries would be rewritten to this release's download URL.
+rm -rf .updates appcast.xml && mkdir -p .updates
 cp "$ZIP" ".updates/kTorrent-$VERSION.zip"
-"$BIN/generate_appcast" .updates \
+"$BIN/generate_appcast" .updates --maximum-deltas 0 \
   --download-url-prefix "https://github.com/$REPO/releases/download/v$VERSION/" \
   -o appcast.xml
 echo "== appcast.xml updated for $VERSION (build $BUILD) =="
