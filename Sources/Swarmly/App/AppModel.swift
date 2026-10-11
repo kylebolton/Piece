@@ -72,6 +72,12 @@ final class AppModel {
     func start() {
         server.start()
         torrents.start()
+        // Screenshots: `SWARMLY_DEMO_QUERY=…` opens Search with that query already run.
+        if DemoTorrents.isEnabled, let query = ProcessInfo.processInfo.environment["SWARMLY_DEMO_QUERY"] {
+            selection = .search
+            search.query = query
+            search.search()
+        }
         // Get the built-in search indexers ready in the background so the first search is instant.
         if !DemoTorrents.isEnabled, search.providers.contains(where: { $0.id == JackettManager.providerID && $0.isEnabled }) {
             Task { try? await JackettManager.shared.ensureRunning() }

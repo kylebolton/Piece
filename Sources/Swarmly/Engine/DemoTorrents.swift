@@ -23,7 +23,8 @@ enum DemoTorrents {
         Entry(name: "Cosmos.Laundromat.2015.1080p.Blender.Open.Movie", gb: 1.9, progress: 0.12, phase: .downloading, rateMB: 4.3, upKB: 60, peers: 12, seeds: 33, addedMinutesAgo: 3),
         Entry(name: "Elephants.Dream.2006.720p.HDRip.x264", gb: 0.9, progress: 0.58, phase: .paused, rateMB: 0, peers: 0, seeds: 0, addedMinutesAgo: 75),
         Entry(name: "Spring.2019.Blender.Open.Movie.1080p.x264", gb: 1.4, progress: 0, phase: .queued, rateMB: 0, peers: 0, seeds: 0, addedMinutesAgo: 1),
-        Entry(name: "ubuntu-26.04-desktop-amd64.iso", gb: 6.2, progress: 1, phase: .seeding, rateMB: 0, upKB: 1850, peers: 19, seeds: 0, addedMinutesAgo: 190),
+        Entry(name: "Nosferatu.1922.Restored.1080p.BluRay.x264", gb: 4.2, progress: 1, phase: .seeding, rateMB: 0, upKB: 1850, peers: 19, seeds: 0, addedMinutesAgo: 190),
+        Entry(name: "Metropolis.1927.Restored.2160p.UHD.BluRay.x265", gb: 11.6, progress: 1, phase: .seeding, rateMB: 0, upKB: 920, peers: 11, seeds: 0, addedMinutesAgo: 320),
     ]
 
     @MainActor static func makeTorrents() -> [Torrent] {
@@ -53,6 +54,30 @@ enum DemoTorrents {
                 return SpeedSample(down: Int(Double(torrent.downloadRate) * wave), up: Int(Double(torrent.uploadRate) * wave))
             }
             return torrent
+        }
+    }
+
+    private static let films: [(title: String, gb: Double, seeders: Int, leechers: Int, daysAgo: Double, provider: String)] = [
+        ("Night.of.the.Living.Dead.1968.Remastered.1080p.BluRay.x264", 2.9, 1840, 212, 12, "Search indexers"),
+        ("Nosferatu.1922.Restored.1080p.BluRay.x264", 4.2, 962, 87, 40, "Search indexers"),
+        ("Metropolis.1927.Restored.2160p.UHD.BluRay.x265", 11.6, 718, 64, 95, "Search indexers"),
+        ("Big.Buck.Bunny.2008.1080p.BluRay.x264", 2.4, 540, 31, 300, "Internet Archive"),
+        ("Sintel.2010.2160p.4K.Blender.Open.Movie.x265", 6.8, 433, 54, 210, "Search indexers"),
+        ("A.Trip.to.the.Moon.1902.Hand-Colored.1080p", 0.8, 291, 18, 520, "Internet Archive"),
+        ("Tears.of.Steel.2012.1080p.WEB-DL.DDP5.1.x264", 3.1, 176, 22, 150, "Search indexers"),
+        ("Charade.1963.1080p.BluRay.FLAC.x264", 7.4, 88, 9, 700, "Search indexers"),
+    ]
+
+    static func searchResults(for query: String) -> [SearchResult] {
+        films.enumerated().map { index, film in
+            var result = SearchResult(title: film.title, provider: film.provider)
+            result.infoHash = String(format: "%040x", 0xA00 + index)
+            result.magnet = "magnet:?xt=urn:btih:\(result.infoHash!)"
+            result.size = Int64(film.gb * 1_073_741_824)
+            result.seeders = film.seeders
+            result.leechers = film.leechers
+            result.date = Date().addingTimeInterval(-film.daysAgo * 86_400)
+            return result
         }
     }
 }

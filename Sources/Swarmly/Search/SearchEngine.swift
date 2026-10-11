@@ -362,6 +362,12 @@ final class SearchStore {
             pending = []
             return
         }
+        if DemoTorrents.isEnabled {
+            results = DemoTorrents.searchResults(for: text)
+            isSearching = false
+            pending = []
+            return
+        }
         let active = providers.filter(\.isEnabled)
         isSearching = true
         pending = Set(active.map(\.name))

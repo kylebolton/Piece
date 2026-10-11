@@ -2,7 +2,9 @@
 
 A native macOS torrent client written in Swift and SwiftUI, with built-in search, play-while-downloading, subtitle matching, AirPlay and an iTunes-style media library.
 
-![Swarmly showing in-progress downloads](docs/screenshot.png)
+![Swarmly transfers](docs/screenshot-transfers.png)
+
+![Swarmly search](docs/screenshot-search.png)
 
 Requires macOS 14 or later. Universal (Apple Silicon and Intel).
 
@@ -44,7 +46,7 @@ Jackett is GPL-2.0 licensed. Swarmly doesn't modify or link it: the app embeds t
 
 ## Screenshots and demo mode
 
-Launching with `SWARMLY_DEMO=1` shows a set of fake in-progress transfers (open-licensed films) in a throwaway data folder, which is how `docs/screenshot.png` was made.
+Launching with `SWARMLY_DEMO=1` shows a set of fake in-progress transfers and canned search results (open-licensed and public-domain films) in a throwaway data folder, which is how the screenshots in `docs/` were made. Add `SWARMLY_DEMO_QUERY="public domain films"` to open Search with that query already run.
 
 ## Auto-update
 
