@@ -18,7 +18,7 @@ Get the latest `kTorrent-<version>.zip` from the [Releases page](https://github.
 - **AirPlay** — send any file to an Apple TV or AirPlay speaker, including while it downloads. Subtitles travel with the stream.
 - **Subtitles** — automatically matches subtitle files in the download and tracks embedded in the video, and searches OpenSubtitles by file hash and title. Timing offset, language preferences, drag-in subtitle files.
 - **Library** — finished downloads are sorted into Films, TV Shows (by season), Music (songs, albums, artists) and Other, with artwork and details from TMDB or Apple's catalogue. Sortable columns, filters, watched state and resume.
-- **Search indexers** — kTorrent runs [Jackett](https://github.com/Jackett/Jackett) privately in the background, so hundreds of public sites are searchable with no setup. The first launch downloads the pinned Jackett release (checked against its SHA-256); it listens on localhost only and quits with the app. Sources → Search indexers → Choose… switches individual sites on or off; only Internet Archive and Linux Tracker are on by default.
+- **Search indexers** — kTorrent ships with [Jackett](https://github.com/Jackett/Jackett) and runs it privately in the background, so a dozen popular public sites are searched out of the box with nothing to install or configure. It listens on localhost only and quits with the app. Sources → Search indexers → Choose… switches any of Jackett's ~100 public sites on or off; you're responsible for what you search for and download.
 - **Search** — one search across all your sources. Ships with Internet Archive and Linux Tracker. Add your own site by typing its address: kTorrent probes for a Torznab API (Jackett/Prowlarr), RSS feed, OpenSearch description or search form, tests it, and learns how to read the results.
 
 ## Building
@@ -28,6 +28,7 @@ Needs Xcode 16 or later, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and C
 ```sh
 scripts/build-deps.sh     # OpenSSL, Boost headers and libtorrent → Vendor/ (about 10 minutes, once)
 scripts/build-ffmpeg.sh   # LGPL ffmpeg and ffprobe → Vendor/ (about 5 minutes, once)
+scripts/fetch-jackett.sh  # pinned Jackett for both architectures → Vendor/jackett/ (embedded by the build)
 scripts/build.sh          # debug build → build/Build/Products/Debug/kTorrent.app
 scripts/build.sh test     # unit and integration tests
 scripts/release.sh        # universal release build → dist/kTorrent.app and dist/kTorrent.zip
@@ -39,7 +40,7 @@ Releases are signed with a Developer ID and notarized by `scripts/release.sh`: s
 
 ## Third-party software
 
-Jackett is GPL-2.0 licensed. kTorrent doesn't modify or link it: it downloads the unmodified release from github.com/Jackett/Jackett and runs it as a separate process. libtorrent (BSD) and an LGPL ffmpeg build are bundled; Sparkle (MIT) handles updates.
+Jackett is GPL-2.0 licensed. kTorrent doesn't modify or link it: the app embeds the unmodified release from github.com/Jackett/Jackett (re-signed, nothing else changed) and runs it as a separate process. `scripts/fetch-jackett.sh` downloads and verifies it; builds without it fetch the same release on first launch. libtorrent (BSD) and an LGPL ffmpeg build are bundled; Sparkle (MIT) handles updates.
 
 ## Screenshots and demo mode
 

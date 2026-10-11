@@ -11,6 +11,9 @@ cd "$(dirname "$0")/.."
 [ -f Vendor/libtorrent/lib/libtorrent-rasterbar.a ] || ./scripts/build-deps.sh
 [ -x Vendor/ffmpeg/bin/ffmpeg ] || ./scripts/build-ffmpeg.sh
 
+# Jackett (search indexers) is embedded in the app; re-signed with the release identity when there is one.
+./scripts/fetch-jackett.sh
+
 xcodegen generate >/dev/null
 xcodebuild -project kTorrent.xcodeproj -scheme kTorrent -configuration Release -derivedDataPath build \
   -destination "generic/platform=macOS" ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO build \
@@ -40,15 +43,16 @@ sign --entitlements "$ENTITLEMENTS" dist/kTorrent.app
 [ "$IDENTITY" = "-" ] || codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" dist/kTorrent.app
 
 ditto -c -k --keepParent dist/kTorrent.app dist/kTorrent.zip
+# Nothing is ever sent to Apple unless you ask: set NOTARY_PROFILE, or NOTARIZE=1, explicitly.
 # Notarize and staple so Gatekeeper opens the app without warnings. Either of:
 #   NOTARY_PROFILE=name        a notarytool keychain profile (xcrun notarytool store-credentials …)
-#   ~/.appstoreconnect/publish.env   App Store Connect API key vars, as used by the other release scripts:
+#   NOTARIZE=1                 with ~/.appstoreconnect/publish.env holding the App Store Connect API key vars:
 #                              APP_STORE_CONNECT_API_KEY_ID / _ISSUER_ID / _API_KEY_PATH (never printed)
 NOTARY_ENV="$HOME/.appstoreconnect/publish.env"
 notary_args=()
 if [ -n "${NOTARY_PROFILE:-}" ]; then
   notary_args=(--keychain-profile "$NOTARY_PROFILE")
-elif [ "$IDENTITY" != "-" ] && [ -f "$NOTARY_ENV" ]; then
+elif [ "${NOTARIZE:-}" = 1 ] && [ "$IDENTITY" != "-" ] && [ -f "$NOTARY_ENV" ]; then
   set -a; . "$NOTARY_ENV"; set +a
   notary_args=(--key "$APP_STORE_CONNECT_API_KEY_PATH" --key-id "$APP_STORE_CONNECT_API_KEY_ID" --issuer "$APP_STORE_CONNECT_ISSUER_ID")
 fi
