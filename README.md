@@ -10,7 +10,7 @@ Requires macOS 14 or later. Universal (Apple Silicon and Intel).
 
 ## Download
 
-Get the latest `Piece-<version>.zip` from the [Releases page](https://github.com/kylebolton/Swarmly/releases/latest), unzip it and drag Piece to Applications. The app is signed with a Developer ID and notarized by Apple, so it opens normally, and it updates itself afterwards (Settings → General → Updates).
+Get the latest `Piece-<version>.zip` from the [Releases page](https://github.com/kylebolton/Piece/releases/latest), unzip it and drag Piece to Applications. The app is signed with a Developer ID and notarized by Apple, so it opens normally, and it updates itself afterwards (Settings → General → Updates).
 
 ## Features
 
