@@ -8,7 +8,7 @@ Requires macOS 14 or later. Universal (Apple Silicon and Intel).
 
 ## Download
 
-Get the latest `kTorrent-<version>.zip` from the [Releases page](https://github.com/kylebolton/kTorrent/releases/latest), unzip it and drag kTorrent to Applications. The app isn't notarized yet, so the first time macOS will block it: open **System Settings → Privacy & Security** and click **Open Anyway** (on macOS 14, right-click the app and choose **Open**). After that it updates itself (Settings → General → Updates).
+Get the latest `kTorrent-<version>.zip` from the [Releases page](https://github.com/kylebolton/kTorrent/releases/latest), unzip it and drag kTorrent to Applications. The app is signed with a Developer ID and notarized by Apple, so it opens normally, and it updates itself afterwards (Settings → General → Updates).
 
 ## Features
 
@@ -34,7 +34,7 @@ scripts/release.sh        # universal release build → dist/kTorrent.app and di
 
 `xcodegen generate` creates `kTorrent.xcodeproj` if you'd rather work in Xcode.
 
-To distribute outside your own Mac, sign with a Developer ID and notarize; see the header of `scripts/release.sh`.
+Releases are signed with a Developer ID and notarized by `scripts/release.sh`: set `DEVELOPER_ID` to your identity and either `NOTARY_PROFILE` (a `notarytool` keychain profile) or an App Store Connect API key in `~/.appstoreconnect/publish.env`. Without them it makes an ad-hoc signed build that only runs on your own Mac.
 
 ## Screenshots and demo mode
 
