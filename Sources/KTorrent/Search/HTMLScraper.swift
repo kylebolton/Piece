@@ -169,11 +169,10 @@ enum HTMLScraper {
         }
     }
 
+    /// Reads a count from a cell, tolerating extras such as "8 +141 ext" or "1,204".
     private static func integer(_ text: String?) -> Int? {
-        guard let text else { return nil }
-        let cleaned = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "")
-        guard !cleaned.isEmpty, cleaned.count <= 9, cleaned.allSatisfy(\.isNumber) else { return nil }
-        return Int(cleaned)
+        guard let text, let match = text.trimmingCharacters(in: .whitespaces).firstMatch(of: /^(\d[\d,]{0,10})(?:\s|$)/) else { return nil }
+        return Int(match.1.replacingOccurrences(of: ",", with: ""))
     }
 
     private static func ancestor(of element: Element, tag: String) -> Element? {
@@ -211,6 +210,8 @@ enum HTMLScraper {
         return best.map { anchor, url, text in
             var result = SearchResult(title: text, provider: provider)
             result.detailsURL = url
+            // Many sites key their pages by info-hash, which lets duplicates from other sources collapse.
+            result.infoHash = url.pathComponents.first { $0.count == 40 && $0.allSatisfy(\.isHexDigit) }?.lowercased()
             fillStats(&result, from: container(of: anchor))
             return result
         }
