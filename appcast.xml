@@ -3,12 +3,12 @@
     <channel>
         <title>kTorrent</title>
         <item>
-            <title>1.0.2</title>
-            <pubDate>Sun, 11 Oct 2026 14:30:01 +0100</pubDate>
-            <sparkle:version>3</sparkle:version>
-            <sparkle:shortVersionString>1.0.2</sparkle:shortVersionString>
+            <title>1.0.3</title>
+            <pubDate>Sun, 11 Oct 2026 14:44:10 +0100</pubDate>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>1.0.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/kylebolton/kTorrent/releases/download/v1.0.2/kTorrent-1.0.2.zip" length="155516929" type="application/octet-stream" sparkle:edSignature="d5/Jk16hHkXY593/CELBVEvq+IlQolbX3NMPJBAoCz5/ihh0X8CxZ+HYms3UHr80Pw8E2IDfMerSkgoSpngGDA=="/>
+            <enclosure url="https://github.com/kylebolton/kTorrent/releases/download/v1.0.3/kTorrent-1.0.3.zip" length="155528270" type="application/octet-stream" sparkle:edSignature="Q0TlWIarixVZ3/VJhJQLbk1kCafFfJxXRbj6HXSZstqW+DreQRFtLE6FcQkhC9By+M0erLKRk6r0aCxBTKpsDg=="/>
         </item>
     </channel>
 </rss>
