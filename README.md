@@ -1,25 +1,25 @@
-# kTorrent
+# Swarmly
 
 A native macOS torrent client written in Swift and SwiftUI, with built-in search, play-while-downloading, subtitle matching, AirPlay and an iTunes-style media library.
 
-![kTorrent showing in-progress downloads](docs/screenshot.png)
+![Swarmly showing in-progress downloads](docs/screenshot.png)
 
 Requires macOS 14 or later. Universal (Apple Silicon and Intel).
 
 ## Download
 
-Get the latest `kTorrent-<version>.zip` from the [Releases page](https://github.com/kylebolton/kTorrent/releases/latest), unzip it and drag kTorrent to Applications. The app is signed with a Developer ID and notarized by Apple, so it opens normally, and it updates itself afterwards (Settings → General → Updates).
+Get the latest `Swarmly-<version>.zip` from the [Releases page](https://github.com/kylebolton/Swarmly/releases/latest), unzip it and drag Swarmly to Applications. The app is signed with a Developer ID and notarized by Apple, so it opens normally, and it updates itself afterwards (Settings → General → Updates).
 
 ## Features
 
 - **Transfers** — magnet links, `.torrent` files and URLs; drag and drop; per-file selection; queueing, speed limits, DHT, PEX, local peer discovery, UPnP/NAT-PMP, encryption; piece map, speed graph, peers and trackers in the inspector.
-- **Play before it's finished** — press play on any video or audio file and kTorrent downloads the pieces the player needs first, following the playhead when you seek.
+- **Play before it's finished** — press play on any video or audio file and Swarmly downloads the pieces the player needs first, following the playhead when you seek.
 - **Any format** — MP4/MOV play directly; MKV, AVI, WebM and the rest are converted on the fly by a bundled ffmpeg (stream copy where possible, hardware encode otherwise).
 - **AirPlay** — send any file to an Apple TV or AirPlay speaker, including while it downloads. Subtitles travel with the stream.
 - **Subtitles** — automatically matches subtitle files in the download and tracks embedded in the video, and searches OpenSubtitles by file hash and title. Timing offset, language preferences, drag-in subtitle files.
 - **Library** — finished downloads are sorted into Films, TV Shows (by season), Music (songs, albums, artists) and Other, with artwork and details from TMDB or Apple's catalogue. Sortable columns, filters, watched state and resume.
-- **Search indexers** — kTorrent ships with [Jackett](https://github.com/Jackett/Jackett) and runs it privately in the background, so a dozen popular public sites are searched out of the box with nothing to install or configure. It listens on localhost only and quits with the app. Sources → Search indexers → Choose… switches any of Jackett's ~100 public sites on or off; you're responsible for what you search for and download.
-- **Search** — one search across all your sources. Ships with Internet Archive and Linux Tracker. Add your own site by typing its address: kTorrent probes for a Torznab API (Jackett/Prowlarr), RSS feed, OpenSearch description or search form, tests it, and learns how to read the results.
+- **Search indexers** — Swarmly ships with [Jackett](https://github.com/Jackett/Jackett) and runs it privately in the background, so a dozen popular public sites are searched out of the box with nothing to install or configure. It listens on localhost only and quits with the app. Sources → Search indexers → Choose… switches any of Jackett's ~100 public sites on or off; you're responsible for what you search for and download.
+- **Search** — one search across all your sources. Ships with Internet Archive and Linux Tracker. Add your own site by typing its address: Swarmly probes for a Torznab API (Jackett/Prowlarr), RSS feed, OpenSearch description or search form, tests it, and learns how to read the results.
 
 ## Building
 
@@ -29,22 +29,22 @@ Needs Xcode 16 or later, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and C
 scripts/build-deps.sh     # OpenSSL, Boost headers and libtorrent → Vendor/ (about 10 minutes, once)
 scripts/build-ffmpeg.sh   # LGPL ffmpeg and ffprobe → Vendor/ (about 5 minutes, once)
 scripts/fetch-jackett.sh  # pinned Jackett for both architectures → Vendor/jackett/ (embedded by the build)
-scripts/build.sh          # debug build → build/Build/Products/Debug/kTorrent.app
+scripts/build.sh          # debug build → build/Build/Products/Debug/Swarmly.app
 scripts/build.sh test     # unit and integration tests
-scripts/release.sh        # universal release build → dist/kTorrent.app and dist/kTorrent.zip
+scripts/release.sh        # universal release build → dist/Swarmly.app and dist/Swarmly.zip
 ```
 
-`xcodegen generate` creates `kTorrent.xcodeproj` if you'd rather work in Xcode.
+`xcodegen generate` creates `Swarmly.xcodeproj` if you'd rather work in Xcode.
 
 Releases are signed with a Developer ID and notarized by `scripts/release.sh`: set `DEVELOPER_ID` to your identity and either `NOTARY_PROFILE` (a `notarytool` keychain profile) or an App Store Connect API key in `~/.appstoreconnect/publish.env`. Without them it makes an ad-hoc signed build that only runs on your own Mac.
 
 ## Third-party software
 
-Jackett is GPL-2.0 licensed. kTorrent doesn't modify or link it: the app embeds the unmodified release from github.com/Jackett/Jackett (re-signed, nothing else changed) and runs it as a separate process. `scripts/fetch-jackett.sh` downloads and verifies it; builds without it fetch the same release on first launch. libtorrent (BSD) and an LGPL ffmpeg build are bundled; Sparkle (MIT) handles updates.
+Jackett is GPL-2.0 licensed. Swarmly doesn't modify or link it: the app embeds the unmodified release from github.com/Jackett/Jackett (re-signed, nothing else changed) and runs it as a separate process. `scripts/fetch-jackett.sh` downloads and verifies it; builds without it fetch the same release on first launch. libtorrent (BSD) and an LGPL ffmpeg build are bundled; Sparkle (MIT) handles updates.
 
 ## Screenshots and demo mode
 
-Launching with `KTORRENT_DEMO=1` shows a set of fake in-progress transfers (open-licensed films) in a throwaway data folder, which is how `docs/screenshot.png` was made.
+Launching with `SWARMLY_DEMO=1` shows a set of fake in-progress transfers (open-licensed films) in a throwaway data folder, which is how `docs/screenshot.png` was made.
 
 ## Auto-update
 
@@ -52,7 +52,7 @@ Updates use [Sparkle](https://sparkle-project.org) and an EdDSA-signed `appcast.
 
 ## Building from a clone
 
-`Sources/KTorrent/Support/BuiltInKeys.swift` is git-ignored because it holds API keys. Copy `BuiltInKeys.swift.template` to that name (empty values are fine) before building.
+`Sources/Swarmly/Support/BuiltInKeys.swift` is git-ignored because it holds API keys. Copy `BuiltInKeys.swift.template` to that name (empty values are fine) before building.
 
 ## Optional API keys
 
@@ -66,13 +66,13 @@ Both are free and entered in Settings.
 | Path | What's there |
 | --- | --- |
 | `Sources/TorrentBridge` | Objective-C++ wrapper around libtorrent |
-| `Sources/KTorrent/Engine` | Torrent session and models |
-| `Sources/KTorrent/Streaming` | Piece-aware HTTP server, ffmpeg/HLS sessions |
-| `Sources/KTorrent/Player` | Video and music players, AirPlay |
-| `Sources/KTorrent/Subtitles` | Parsers, matching, OpenSubtitles |
-| `Sources/KTorrent/Library` | Release-name parser, metadata, library store |
-| `Sources/KTorrent/Search` | Providers, feed parser, HTML scraper, site detector |
-| `Sources/KTorrent/UI` | SwiftUI views |
+| `Sources/Swarmly/Engine` | Torrent session and models |
+| `Sources/Swarmly/Streaming` | Piece-aware HTTP server, ffmpeg/HLS sessions |
+| `Sources/Swarmly/Player` | Video and music players, AirPlay |
+| `Sources/Swarmly/Subtitles` | Parsers, matching, OpenSubtitles |
+| `Sources/Swarmly/Library` | Release-name parser, metadata, library store |
+| `Sources/Swarmly/Search` | Providers, feed parser, HTML scraper, site detector |
+| `Sources/Swarmly/UI` | SwiftUI views |
 
 ## Known limits
 
@@ -82,4 +82,4 @@ Both are free and entered in Settings.
 
 ## Legal
 
-kTorrent is a BitTorrent client. Use it only for content you have the right to download and share. The bundled ffmpeg is built LGPL-only; libtorrent is BSD-licensed.
+Swarmly is a BitTorrent client. Use it only for content you have the right to download and share. The bundled ffmpeg is built LGPL-only; libtorrent is BSD-licensed.

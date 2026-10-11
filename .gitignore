@@ -8,5 +8,5 @@ xcuserdata/
 .swiftpm/
 .build/
 dist/
-Sources/KTorrent/Support/BuiltInKeys.swift
+Sources/Swarmly/Support/BuiltInKeys.swift
 .updates/

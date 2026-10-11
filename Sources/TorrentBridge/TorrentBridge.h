@@ -120,7 +120,7 @@ NS_SWIFT_SENDABLE
 - (void)removeTorrent:(NSString *)infoHash deleteFiles:(BOOL)deleteFiles;
 - (void)pauseTorrent:(NSString *)infoHash;
 - (void)resumeTorrent:(NSString *)infoHash;
-- (void)recheckTorrent:(NSString *)infoHash;
+- (void)rechecSwarmly:(NSString *)infoHash;
 - (void)reannounceTorrent:(NSString *)infoHash;
 - (void)setSequential:(BOOL)sequential forTorrent:(NSString *)infoHash;
 
