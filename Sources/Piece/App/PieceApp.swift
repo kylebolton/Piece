@@ -55,11 +55,12 @@ struct PieceApp: App {
         }
 
         MenuBarExtra(isInserted: Bindable(app.settings).showMenuBarItem) {
-            MenuBarContent()
+            MenuBarPanel()
                 .environment(app)
         } label: {
             MenuBarLabel(torrents: app.torrents)
         }
+        .menuBarExtraStyle(.window)
     }
 }
 
@@ -72,30 +73,6 @@ private struct MenuBarLabel: View {
             Image(systemName: active ? "arrow.down.circle.fill" : "arrow.down.circle")
             if torrents.downloadRate > 0 { Text(Format.rate(torrents.downloadRate)) }
         }
-    }
-}
-
-private struct MenuBarContent: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Text("↓ \(Format.rate(app.torrents.downloadRate))   ↑ \(Format.rate(app.torrents.uploadRate))")
-        Divider()
-        ForEach(app.torrents.torrents.filter { !$0.isComplete }.prefix(6)) { torrent in
-            Text("\(Format.percent(torrent.progress))  \(torrent.name)")
-        }
-        if app.torrents.torrents.contains(where: { !$0.isComplete }) { Divider() }
-        Button("Open Piece") {
-            openWindow(id: "main")
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        Button("Add Magnet Link from Clipboard") { _ = app.addFromPasteboard() }
-        Divider()
-        Button("Pause All") { app.torrents.pauseAll() }
-        Button("Resume All") { app.torrents.resumeAll() }
-        Divider()
-        Button("Quit Piece") { NSApp.terminate(nil) }
     }
 }
 
