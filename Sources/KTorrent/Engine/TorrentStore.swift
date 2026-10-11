@@ -168,7 +168,9 @@ final class TorrentStore {
         do {
             var request = URLRequest(url: url)
             request.setValue(HTTP.userAgent, forHTTPHeaderField: "User-Agent")
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let redirectGuard = MagnetRedirectGuard()
+            let (data, _) = try await URLSession.shared.data(for: request, delegate: redirectGuard)
+            if let magnet = redirectGuard.magnet { return add(magnet: magnet) }
             if let text = String(data: data.prefix(4096), encoding: .utf8),
                let magnet = text.firstMatch(of: /magnet:\?xt=urn:bt[a-z0-9]+:[^"'<\s]+/) {
                 return add(magnet: String(magnet.0))
@@ -294,4 +296,23 @@ final class TorrentStore {
 enum HTTP {
     static let userAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+}
+
+
+/// Indexers such as Jackett answer a download request with a redirect to a `magnet:` URL, which
+/// URLSession can't follow ("unsupported URL"). This stops at that redirect and keeps the magnet.
+private final class MagnetRedirectGuard: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var found: String?
+    var magnet: String? { lock.lock(); defer { lock.unlock() }; return found }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        if let url = request.url, url.scheme?.lowercased() == "magnet" {
+            lock.lock(); found = url.absoluteString; lock.unlock()
+            completionHandler(nil)
+        } else {
+            completionHandler(request)
+        }
+    }
 }

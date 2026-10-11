@@ -36,6 +36,7 @@ private struct GeneralSettings: View {
             }
             Toggle("Notify me when a download finishes", isOn: $settings.notifyOnCompletion)
             Toggle("Show transfer speeds in the menu bar", isOn: $settings.showMenuBarItem)
+            Toggle("Hide adult (XXX) results in search", isOn: $settings.hideAdultResults)
             Section("Updates") {
                 Toggle("Check for updates automatically", isOn: Binding(
                     get: { updater.automaticallyChecks }, set: { updater.automaticallyChecks = $0 }))

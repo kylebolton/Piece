@@ -19,6 +19,11 @@ struct SearchResult: Identifiable, Hashable {
     /// True when the download link still has to be read off the result's details page.
     var needsResolving: Bool { magnet == nil && torrentURL == nil }
 
+    private static let adultPattern = /(?i)\b(xxx|porn\w*|jav|brazzers|bangbros|onlyfans|hentai|milf|blowjob|creampie|anal|handjob|nsfw|erotica?|sex\s?scene|adult\s?only|nubiles|naughtyamerica|realitykings|pornhub|fakehub|mofos|vixen|blacked|tushy|javhd)\b/
+
+    /// Heuristic: release titles for adult material nearly always carry one of these tags.
+    var looksAdult: Bool { title.contains(Self.adultPattern) }
+
     // Non-optional keys so the results table can sort on them.
     var sortSize: Int64 { size ?? -1 }
     var sortSeeders: Int { seeders ?? -1 }

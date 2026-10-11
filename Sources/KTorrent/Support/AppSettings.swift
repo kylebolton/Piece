@@ -21,6 +21,7 @@ final class AppSettings {
 
     var addToLibraryAutomatically: Bool { didSet { defaults.set(addToLibraryAutomatically, forKey: "addToLibrary") } }
     var notifyOnCompletion: Bool { didSet { defaults.set(notifyOnCompletion, forKey: "notifyOnCompletion") } }
+    var hideAdultResults: Bool { didSet { defaults.set(hideAdultResults, forKey: "hideAdultResults") } }
     var showMenuBarItem: Bool { didSet { defaults.set(showMenuBarItem, forKey: "showMenuBarItem") } }
 
     /// ISO 639-1 codes in order of preference, e.g. ["en", "es"].
@@ -61,6 +62,7 @@ final class AppSettings {
         addToLibraryAutomatically = defaults.bool(forKey: "addToLibrary")
         notifyOnCompletion = defaults.bool(forKey: "notifyOnCompletion")
         showMenuBarItem = defaults.bool(forKey: "showMenuBarItem")
+        hideAdultResults = defaults.bool(forKey: "hideAdultResults")
         subtitleLanguages = defaults.stringArray(forKey: "subtitleLanguages") ?? ["en"]
         autoLoadSubtitles = defaults.bool(forKey: "autoLoadSubtitles")
         subtitleFontScale = defaults.double(forKey: "subtitleFontScale")

@@ -12,7 +12,8 @@ struct SearchView: View {
 
     var body: some View {
         @Bindable var store = app.search
-        let results = store.results.sorted(using: sortOrder)
+        let hideAdult = AppSettings.shared.hideAdultResults
+        let results = store.results.filter { !hideAdult || !$0.looksAdult }.sorted(using: sortOrder)
         VStack(spacing: 0) {
             VStack(spacing: 12) {
                 HStack(spacing: 10) {
