@@ -23,7 +23,10 @@ cp -R "$APP" dist/
 
 IDENTITY="${DEVELOPER_ID:--}"
 ENTITLEMENTS=Sources/KTorrent/Resources/kTorrent.entitlements
-sign() { codesign --force --options runtime --timestamp=none --sign "$IDENTITY" "$@"; }
+# Notarization requires a secure timestamp on every binary; ad-hoc builds can't get one.
+TIMESTAMP=--timestamp
+[ "$IDENTITY" = "-" ] && TIMESTAMP=--timestamp=none
+sign() { codesign --force --options runtime "$TIMESTAMP" --sign "$IDENTITY" "$@"; }
 # Inside-out: Sparkle's helpers, then the framework, then ffmpeg, then the app (which keeps its entitlements).
 SPARKLE=dist/kTorrent.app/Contents/Frameworks/Sparkle.framework/Versions/B
 if [ -d "$SPARKLE" ]; then
@@ -37,11 +40,20 @@ sign --entitlements "$ENTITLEMENTS" dist/kTorrent.app
 [ "$IDENTITY" = "-" ] || codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" dist/kTorrent.app
 
 ditto -c -k --keepParent dist/kTorrent.app dist/kTorrent.zip
-# With a notarytool keychain profile, notarize and staple so Gatekeeper opens the app without warnings:
-#   xcrun notarytool store-credentials kTorrent --apple-id you@example.com --team-id TEAMID   (app-specific password)
-#   NOTARY_PROFILE=kTorrent DEVELOPER_ID="Developer ID Application: …" scripts/release.sh
+# Notarize and staple so Gatekeeper opens the app without warnings. Either of:
+#   NOTARY_PROFILE=name        a notarytool keychain profile (xcrun notarytool store-credentials …)
+#   ~/.appstoreconnect/publish.env   App Store Connect API key vars, as used by the other release scripts:
+#                              APP_STORE_CONNECT_API_KEY_ID / _ISSUER_ID / _API_KEY_PATH (never printed)
+NOTARY_ENV="$HOME/.appstoreconnect/publish.env"
+notary_args=()
 if [ -n "${NOTARY_PROFILE:-}" ]; then
-  xcrun notarytool submit dist/kTorrent.zip --keychain-profile "$NOTARY_PROFILE" --wait
+  notary_args=(--keychain-profile "$NOTARY_PROFILE")
+elif [ "$IDENTITY" != "-" ] && [ -f "$NOTARY_ENV" ]; then
+  set -a; . "$NOTARY_ENV"; set +a
+  notary_args=(--key "$APP_STORE_CONNECT_API_KEY_PATH" --key-id "$APP_STORE_CONNECT_API_KEY_ID" --issuer "$APP_STORE_CONNECT_ISSUER_ID")
+fi
+if [ ${#notary_args[@]} -gt 0 ]; then
+  xcrun notarytool submit dist/kTorrent.zip "${notary_args[@]}" --wait
   xcrun stapler staple dist/kTorrent.app
   rm dist/kTorrent.zip && ditto -c -k --keepParent dist/kTorrent.app dist/kTorrent.zip
   spctl --assess --type execute -vv dist/kTorrent.app
