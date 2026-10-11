@@ -4,22 +4,11 @@
         <title>kTorrent</title>
         <item>
             <title>1.0.1</title>
-            <pubDate>Sun, 11 Oct 2026 13:52:02 +0100</pubDate>
+            <pubDate>Sun, 11 Oct 2026 13:55:28 +0100</pubDate>
             <sparkle:version>2</sparkle:version>
             <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/kylebolton/kTorrent/releases/download/v1.0.1/kTorrent-1.0.1.zip" length="57776166" type="application/octet-stream" sparkle:edSignature="DU6Y690MobQvrSXUae0nqRdQcCKhO6Mr4HB+4Fy+zxRloQadSlsU5CBpsdXqs7GxBSgW3QCOFISJwjEj8rMpCA=="/>
-            <sparkle:deltas>
-                <enclosure url="https://github.com/kylebolton/kTorrent/releases/download/v1.0.1/kTorrent2-1.delta" sparkle:deltaFrom="1" length="57454" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="976240" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="cEW/d2ZI0aFASm/lIP9YFpiOg0a2c3VPfYGc59ihouKCM91SDzD4vZqqcx8oaUPUzAzzSwVPvnpVyiRoLzD/AQ=="/>
-            </sparkle:deltas>
-        </item>
-        <item>
-            <title>1.0.0</title>
-            <pubDate>Sun, 11 Oct 2026 13:35:45 +0100</pubDate>
-            <sparkle:version>1</sparkle:version>
-            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/kylebolton/kTorrent/releases/download/v1.0.1/kTorrent-1.0.0.zip" length="57712785" type="application/octet-stream" sparkle:edSignature="SOBXWm1hs52JRtvsCUr96NykolLhJ6if9yIYoHjL69OA9QONPVwCYhkHZRmV7iiS4GMqrLNLPTgWpkM5TATaCw=="/>
         </item>
     </channel>
 </rss>
