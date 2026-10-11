@@ -48,6 +48,17 @@ final class PlayerModel {
     private(set) var bufferingDetail = ""
     private(set) var isExternal = false
     private(set) var isConverting = false
+    private(set) var isPlaying = false
+    /// Playback speed chosen by the viewer (1 = normal).
+    private(set) var rate: Float = 1
+    /// Set while a resumed position is being offered back ("Resumed at 12:34 — Start Over").
+    private(set) var resumedFrom: Double?
+    /// A non-fatal problem worth showing, such as the converter stopping mid-stream.
+    private(set) var notice: String?
+    /// True while the player window is on screen; AirPlay keeps going without it.
+    var isWindowVisible = false
+    /// Called when a library item plays to the end, so the app can queue the next episode.
+    @ObservationIgnored var onFinished: ((UUID) -> Void)?
 
     private(set) var subtitleTracks: [SubtitleTrack] = []
     private(set) var selectedSubtitleID: String?
@@ -75,6 +86,9 @@ final class PlayerModel {
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var statusTask: Task<Void, Never>?
     @ObservationIgnored private var lastSavedPosition: Double = 0
+    @ObservationIgnored private var openSerial = 0
+    @ObservationIgnored private var activity: NSObjectProtocol?
+    @ObservationIgnored private var resumeToastTask: Task<Void, Never>?
 
     init(server: StreamServer, torrents: TorrentStore, library: LibraryStore) {
         self.server = server
@@ -84,7 +98,11 @@ final class PlayerModel {
 
         observations.append(player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-            Task { @MainActor in self?.isBuffering = waiting }
+            let playing = player.timeControlStatus != .paused
+            Task { @MainActor in
+                self?.isBuffering = waiting
+                self?.isPlaying = playing
+            }
         })
         observations.append(player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] player, _ in
             let active = player.isExternalPlaybackActive
@@ -115,6 +133,7 @@ final class PlayerModel {
         }
         item = newItem
         status = .preparing("Preparing…")
+        showResumeToast(newItem.startPosition > 1 ? newItem.startPosition : nil)
 
         if case .torrent(let hash, let index, _, _, let size) = newItem.origin {
             if let torrent = torrents.torrent(hash), torrent.phase == .paused { torrents.resume(torrent) }
@@ -161,6 +180,87 @@ final class PlayerModel {
         subtitleDelay = 0
         isConverting = false
         isBuffering = false
+        isPlaying = false
+        notice = nil
+        resumedFrom = nil
+        resumeToastTask?.cancel()
+        endActivity()
+    }
+
+    // MARK: - Transport
+
+    func skip(by seconds: Double) {
+        guard item != nil, status == .ready else { return }
+        let duration = player.currentItem?.duration.seconds ?? 0
+        var target = max(0, currentTime + seconds)
+        if duration.isFinite, duration > 0 { target = min(target, max(0, duration - 1)) }
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero,
+                    toleranceAfter: CMTime(seconds: 0.5, preferredTimescale: 600))
+    }
+
+    func setRate(_ newRate: Float) {
+        rate = min(max(newRate, 0.25), 3)
+        player.defaultRate = rate
+        if player.timeControlStatus != .paused { player.rate = rate }
+    }
+
+    func stepRate(_ direction: Int) {
+        let steps: [Float] = [0.5, 0.75, 1, 1.25, 1.5, 2, 3]
+        let index = steps.lastIndex { $0 <= rate + 0.001 } ?? 2
+        setRate(steps[min(max(index + direction, 0), steps.count - 1)])
+    }
+
+    func togglePlayPause() {
+        guard item != nil else { return }
+        if player.timeControlStatus == .paused { player.play() } else { player.pause() }
+    }
+
+    func startOver() {
+        resumedFrom = nil
+        player.seek(to: .zero)
+    }
+
+    func retry() {
+        guard let item else { return }
+        var again = item
+        again.startPosition = max(again.startPosition, currentTime)
+        play(again)
+    }
+
+    /// Cycles off → each subtitle track → off, for a keyboard shortcut.
+    func cycleSubtitles() {
+        guard !subtitleTracks.isEmpty else { return }
+        let next: SubtitleTrack?
+        if let index = subtitleTracks.firstIndex(where: { $0.id == selectedSubtitleID }) {
+            next = index + 1 < subtitleTracks.count ? subtitleTracks[index + 1] : nil
+        } else {
+            next = subtitleTracks.first
+        }
+        Task { await select(subtitle: next) }
+    }
+
+    private func showResumeToast(_ position: Double?) {
+        resumeToastTask?.cancel()
+        resumedFrom = position
+        guard position != nil else { return }
+        resumeToastTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            self?.resumedFrom = nil
+        }
+    }
+
+    // MARK: - Keeping the Mac awake while casting
+
+    private func beginActivity() {
+        guard activity == nil else { return }
+        activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled],
+                                                         reason: "Streaming to an AirPlay receiver")
+    }
+
+    private func endActivity() {
+        if let activity { ProcessInfo.processInfo.endActivity(activity) }
+        activity = nil
     }
 
     private var isFileComplete: Bool {
@@ -185,6 +285,8 @@ final class PlayerModel {
     private func open(at position: Double, forceHLS: Bool, withSubtitles: Bool) async {
         guard let item else { return }
         let generation = generation
+        openSerial += 1
+        let serial = openSerial
         let ext = (item.absolutePath as NSString).pathExtension.lowercased()
         let wantsSubtitles = withSubtitles && !cues.isEmpty
         let useHLS = forceHLS || wantsSubtitles || !FileKind.nativeExtensions.contains(ext)
@@ -199,6 +301,8 @@ final class PlayerModel {
                 guard generation == self.generation else { return }
                 audioStreams = probe?.audio ?? []
             }
+            // A newer open (say, AirPlay connecting while a reopen was in flight) supersedes this one.
+            guard serial == openSerial else { return }
             let session = HLSSession(server: server)
             let subtitles = wantsSubtitles
                 ? (name: selectedSubtitle?.menuTitle ?? "Subtitles", language: selectedSubtitle?.language, cues: shiftedCues())
@@ -306,6 +410,7 @@ final class PlayerModel {
             $0.playPosition = 0
             $0.playCount += 1
         }
+        onFinished?(id)
     }
 
     private func startStatusUpdates() {
@@ -319,7 +424,12 @@ final class PlayerModel {
                 } else {
                     self.bufferingDetail = ""
                 }
-                if let hls = self.hls, !hls.isRunning, self.isConverting { self.isConverting = false }
+                if let hls = self.hls, !hls.isRunning, self.isConverting {
+                    self.isConverting = false
+                    if hls.failureStatus != nil, self.status == .ready {
+                        self.notice = "The converter stopped early, so playback may end before the film does."
+                    }
+                }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -329,6 +439,14 @@ final class PlayerModel {
 
     private func externalPlaybackChanged(_ active: Bool) {
         isExternal = active
+        if active { beginActivity() } else {
+            endActivity()
+            // The window was closed to leave the film playing on the TV; with the TV gone there's nothing left to show.
+            if !isWindowVisible, item != nil {
+                stop()
+                return
+            }
+        }
         guard item != nil, status == .ready else { return }
         if active, !cues.isEmpty, mode != .hls(withSubtitles: true) {
             // The overlay can't reach the TV, so rebuild the stream with a subtitle track inside it.
@@ -342,7 +460,9 @@ final class PlayerModel {
     private func selectLegibleOption(on playerItem: AVPlayerItem) async {
         guard case .hls(withSubtitles: true) = mode,
               let group = try? await playerItem.asset.loadMediaSelectionGroup(for: .legible) else { return }
-        playerItem.select(isExternal ? group.options.first : nil, in: group)
+        let language = selectedSubtitle?.language
+        let option = group.options.first { $0.extendedLanguageTag?.hasPrefix(language ?? "\u{0}") == true } ?? group.options.first
+        playerItem.select(isExternal ? option : nil, in: group)
     }
 
     private func shiftedCues() -> [SubtitleCue] {

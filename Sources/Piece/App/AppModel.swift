@@ -73,6 +73,7 @@ final class AppModel {
         server = StreamServer(session: torrents.session)
         player = PlayerModel(server: server, torrents: torrents, library: library)
         audio = AudioPlayer(server: server, library: library)
+        player.onFinished = { [weak self] id in self?.playNextEpisode(after: id) }
         torrents.onFinished = { [weak self] torrent in self?.torrentFinished(torrent) }
     }
 
@@ -234,6 +235,20 @@ final class AppModel {
         audio.stop()
         player.play(item)
         playerRequest += 1
+    }
+
+    /// When an episode ends, carry straight on with the next one in the same show.
+    private func playNextEpisode(after id: UUID) {
+        guard let finished = library.item(id), finished.kind == .episode, let show = finished.showTitle?.lowercased() else { return }
+        let episodes = library.items.filter { $0.kind == .episode && $0.showTitle?.lowercased() == show }
+            .sorted { ($0.season ?? 0, $0.episode ?? 0) < ($1.season ?? 0, $1.episode ?? 0) }
+        guard let index = episodes.firstIndex(where: { $0.id == id }), index + 1 < episodes.count else { return }
+        let next = episodes[index + 1]
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard player.item == nil || player.item?.libraryID == id else { return }
+            play(next, fromStart: true)
+        }
     }
 
     func play(tracks: [MediaItem], startingAt index: Int) {

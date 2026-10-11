@@ -41,6 +41,29 @@ final class IntegrationTests: XCTestCase {
         return hash
     }
 
+    func testHLSFilesHonourRangeRequests() async throws {
+        let directory = folder.appendingPathComponent("hls", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let payload = Data((0..<1000).map { UInt8($0 % 251) })
+        try payload.write(to: directory.appendingPathComponent("init.mp4"))
+        server.registerHLS(id: "test", directory: directory)
+        let url = server.hlsURL(sessionID: "test", file: "init.mp4")
+        let local = URL(string: url.absoluteString.replacingOccurrences(of: url.host ?? "", with: "127.0.0.1"))!
+
+        var request = URLRequest(url: local)
+        request.setValue("bytes=100-199", forHTTPHeaderField: "Range")
+        let (part, response) = try await URLSession.shared.data(for: request)
+        let http = try XCTUnwrap(response as? HTTPURLResponse)
+        XCTAssertEqual(http.statusCode, 206)
+        XCTAssertEqual(http.value(forHTTPHeaderField: "Content-Range"), "bytes 100-199/1000")
+        XCTAssertEqual(part, payload.subdata(in: 100..<200))
+
+        let (whole, wholeResponse) = try await URLSession.shared.data(from: local)
+        XCTAssertEqual((wholeResponse as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual((wholeResponse as? HTTPURLResponse)?.value(forHTTPHeaderField: "Accept-Ranges"), "bytes")
+        XCTAssertEqual(whole, payload)
+    }
+
     func testStreamsTorrentFileWithRanges() async throws {
         var bytes = [UInt8](repeating: 0, count: 3_000_000)
         for index in bytes.indices { bytes[index] = UInt8(truncatingIfNeeded: index &* 31 &+ index / 255) }

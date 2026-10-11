@@ -104,8 +104,23 @@ private struct AppCommands: Commands {
             Button("Show Inspector") { app.showInspector.toggle() }
                 .keyboardShortcut("i")
         }
+        CommandMenu("Playback") {
+            Button("Play / Pause") { app.player.togglePlayPause() }.keyboardShortcut("p", modifiers: [.command, .option])
+            Divider()
+            Button("Skip Back 10 Seconds") { app.player.skip(by: -10) }.keyboardShortcut(.leftArrow, modifiers: .command)
+            Button("Skip Forward 10 Seconds") { app.player.skip(by: 10) }.keyboardShortcut(.rightArrow, modifiers: .command)
+            Button("Skip Back 30 Seconds") { app.player.skip(by: -30) }.keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+            Button("Skip Forward 30 Seconds") { app.player.skip(by: 30) }.keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            Divider()
+            Button("Faster") { app.player.stepRate(1) }.keyboardShortcut("]", modifiers: .command)
+            Button("Slower") { app.player.stepRate(-1) }.keyboardShortcut("[", modifiers: .command)
+            Button("Normal Speed") { app.player.setRate(1) }.keyboardShortcut("\\", modifiers: .command)
+            Divider()
+            Button("Next Subtitle Track") { app.player.cycleSubtitles() }.keyboardShortcut("c", modifiers: [.command, .option])
+        }
         CommandMenu("Go") {
             Button("Transfers") { app.selection = .transfers(.all) }.keyboardShortcut("1")
+            Button("Shelf") { app.selection = .shelf }.keyboardShortcut("0")
             Button("Films") { app.selection = .films }.keyboardShortcut("2")
             Button("TV Shows") { app.selection = .tv }.keyboardShortcut("3")
             Button("Music") { app.selection = .music }.keyboardShortcut("4")

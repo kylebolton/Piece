@@ -252,6 +252,12 @@ final class HLSSession {
 
     var isRunning: Bool { process?.isRunning ?? false }
 
+    /// Non-zero when ffmpeg stopped on its own with an error (nil while running or after a clean finish).
+    var failureStatus: Int32? {
+        guard let process, !process.isRunning, process.terminationReason == .exit || process.terminationReason == .uncaughtSignal else { return nil }
+        return process.terminationStatus == 0 ? nil : process.terminationStatus
+    }
+
     func stop() {
         if let process, process.isRunning { process.terminate() }
         (process?.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil

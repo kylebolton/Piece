@@ -79,6 +79,24 @@ struct PlayerWindow: View {
                         .fixedSize()
                         .help("Audio track")
                     }
+                    Menu {
+                        ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2, 3], id: \.self) { speed in
+                            Button {
+                                model.setRate(speed)
+                            } label: {
+                                let name = speed == 1 ? "Normal" : String(format: "%g×", speed)
+                                if abs(model.rate - speed) < 0.01 { Label(name, systemImage: "checkmark") } else { Text(name) }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "gauge.with.needle").frame(width: 30, height: 30)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Playback speed")
+                    .accessibilityLabel("Playback speed")
+
                     Button {
                         showSubtitles.toggle()
                     } label: {
@@ -87,11 +105,8 @@ struct PlayerWindow: View {
                     }
                     .buttonStyle(.plain)
                     .help("Subtitles")
+                    .accessibilityLabel("Subtitles")
                     .popover(isPresented: $showSubtitles, arrowEdge: .bottom) { SubtitlePanel() }
-
-                    AirPlayButton(player: model.player)
-                        .frame(width: 30, height: 30)
-                        .help("AirPlay")
                 }
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.white)
@@ -101,8 +116,9 @@ struct PlayerWindow: View {
                 .environment(\.colorScheme, .dark)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(12)
-                .opacity(isHovering || showSubtitles || model.status != .ready ? 1 : 0)
+                .opacity(isHovering || showSubtitles || !model.isPlaying || model.status != .ready ? 1 : 0)
                 Spacer()
+                bottomNotices(model)
             }
         }
         .frame(minWidth: 520, minHeight: 300)
@@ -121,7 +137,12 @@ struct PlayerWindow: View {
             }
         }
         .navigationTitle(windowTitle(model))
-        .onDisappear { model.stop() }
+        .onAppear { model.isWindowVisible = true }
+        .onDisappear {
+            model.isWindowVisible = false
+            // Closing the window while casting leaves the film playing on the TV.
+            if !model.isExternal { model.stop() }
+        }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let provider = providers.first else { return false }
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -154,6 +175,13 @@ struct PlayerWindow: View {
                 Image(systemName: "exclamationmark.triangle").font(.system(size: 34, weight: .light))
                 Text("This file couldn't be played").font(.headline)
                 Text(message).font(.callout).foregroundStyle(.white.opacity(0.7)).multilineTextAlignment(.center).frame(maxWidth: 420)
+                HStack {
+                    Button("Try Again", systemImage: "arrow.clockwise") { model.retry() }
+                    if let item = model.item, case .file(let url) = item.origin {
+                        Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                    }
+                }
+                .padding(.top, 4)
             }
             .foregroundStyle(.white)
             .padding(24)
@@ -169,6 +197,37 @@ struct PlayerWindow: View {
                 statusCard(title: "Buffering…", detail: model.bufferingDetail, showsSpinner: true)
             }
         }
+    }
+
+    /// The resume offer and any non-fatal warning, sitting just above the transport controls.
+    @ViewBuilder
+    private func bottomNotices(_ model: PlayerModel) -> some View {
+        VStack(spacing: 8) {
+            if let from = model.resumedFrom {
+                HStack(spacing: 10) {
+                    Text("Resumed at \(Format.duration(from))")
+                    Button("Start Over") { model.startOver() }.buttonStyle(.borderless)
+                }
+                .font(.callout)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .glassBackground(in: Capsule())
+                .environment(\.colorScheme, .dark)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if let notice = model.notice {
+                Label(notice, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .glassBackground(in: Capsule())
+                    .environment(\.colorScheme, .dark)
+            }
+        }
+        .padding(.bottom, 90)
+        .animation(.smooth, value: model.resumedFrom)
     }
 
     private func statusCard(title: String, detail: String, showsSpinner: Bool) -> some View {

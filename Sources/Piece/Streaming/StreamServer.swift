@@ -271,13 +271,23 @@ final class StreamServer {
             waited += 0.25
         }
         guard let data = try? Data(contentsOf: url) else { return sendStatus(connection, 404, "Not Found") }
-        let headers = [
+        // Receivers often fetch init segments and media with Range requests; answer them properly.
+        let size = Int64(data.count)
+        guard let range = HTTPRequest.byteRange(header: request.headers["range"], size: size) else {
+            _ = sendHead(connection, status: "416 Range Not Satisfiable", headers: [("Content-Range", "bytes */\(size)")])
+            return
+        }
+        let partial = request.headers["range"] != nil && size > 0
+        var headers = [
             ("Content-Type", Self.contentType(for: file)),
-            ("Content-Length", String(data.count)),
+            ("Accept-Ranges", "bytes"),
+            ("Content-Length", String(size == 0 ? 0 : range.count)),
             ("Cache-Control", file.hasSuffix(".m3u8") ? "no-cache" : "max-age=3600"),
         ]
-        guard sendHead(connection, status: "200 OK", headers: headers), request.method == "GET" else { return }
-        send(connection, data)
+        if partial { headers.append(("Content-Range", "bytes \(range.lowerBound)-\(range.upperBound)/\(size)")) }
+        guard sendHead(connection, status: partial ? "206 Partial Content" : "200 OK", headers: headers),
+              request.method == "GET", size > 0 else { return }
+        send(connection, partial ? data.subdata(in: Int(range.lowerBound)..<Int(range.upperBound) + 1) : data)
     }
 
     static func contentType(for path: String) -> String {
@@ -317,12 +327,18 @@ final class ClosedFlag {
 }
 
 enum NetworkInfo {
-    /// IPv4 address of the first active non-loopback interface (Wi-Fi or Ethernet).
+    /// Name of the interface macOS currently routes through (Wi-Fi or Ethernet), kept up to date as the network changes.
+    private static let preferred = PreferredInterface()
+
+    /// IPv4 address AirPlay receivers should use to reach this Mac: the active route's interface, skipping VPN and bridge
+    /// interfaces, falling back to the first Ethernet/Wi-Fi style interface.
     static var primaryIPv4: String? {
         var list: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&list) == 0, let first = list else { return nil }
         defer { freeifaddrs(list) }
-        var fallback: String?
+        let wanted = preferred.name
+        var byName: [String: String] = [:]
+        var order: [String] = []
         for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
             let interface = pointer.pointee
             let flags = Int32(interface.ifa_flags)
@@ -332,11 +348,33 @@ enum NetworkInfo {
             guard getnameinfo(address, socklen_t(address.pointee.sa_len), &host, socklen_t(host.count), nil, 0,
                               NI_NUMERICHOST) == 0 else { continue }
             let ip = String(cString: host)
-            let name = String(cString: interface.ifa_name)
             if ip.hasPrefix("169.254.") { continue }
-            if name.hasPrefix("en") { return ip }
-            fallback = fallback ?? ip
+            let name = String(cString: interface.ifa_name)
+            if byName[name] == nil { byName[name] = ip; order.append(name) }
         }
-        return fallback
+        if let wanted, let ip = byName[wanted] { return ip }
+        // utun*/bridge*/awdl*/llw* are VPNs, VM bridges and AirDrop links that receivers can't reach.
+        let usable = order.filter { !["utun", "bridge", "awdl", "llw", "ap", "gif", "stf", "anpi"].contains(where: $0.hasPrefix) }
+        return (usable.first { $0.hasPrefix("en") } ?? usable.first).flatMap { byName[$0] }
+    }
+}
+
+private final class PreferredInterface {
+    private let monitor = NWPathMonitor()
+    private let lock = NSLock()
+    private var value: String?
+
+    init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let self else { return }
+            let name = path.availableInterfaces.first { $0.type == .wifi || $0.type == .wiredEthernet }?.name
+            self.lock.lock(); self.value = name; self.lock.unlock()
+        }
+        monitor.start(queue: DispatchQueue(label: "Piece.network"))
+    }
+
+    var name: String? {
+        lock.lock(); defer { lock.unlock() }
+        return value
     }
 }
