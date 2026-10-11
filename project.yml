@@ -34,7 +34,9 @@ targets:
     sources:
       - path: Sources/Piece
       - path: Sources/TorrentBridge
+      - path: Sources/Shared
     dependencies:
+      - target: PieceWidget
       - package: SwiftSoup
       - package: Sparkle
       - sdk: libc++.tbd
@@ -145,6 +147,32 @@ targets:
           else
             echo "warning: Vendor/jackett missing — run scripts/fetch-jackett.sh (the app will download Jackett on first launch instead)"
           fi
+
+  PieceWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: Sources/PieceWidget
+        excludes: ["*.entitlements"]
+      - path: Sources/Shared
+    settings:
+      base:
+        PRODUCT_NAME: PieceWidget
+        PRODUCT_BUNDLE_IDENTIFIER: me.kylebolton.piece.widget
+        CODE_SIGN_ENTITLEMENTS: Sources/PieceWidget/PieceWidget.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Piece
+        INFOPLIST_KEY_NSHumanReadableCopyright: "© 2026 Kyle Bolton"
+        SKIP_INSTALL: YES
+    info:
+      path: Sources/PieceWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Piece
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
 
   PieceTests:
     type: bundle.unit-test

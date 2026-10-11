@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import UserNotifications
+import WidgetKit
 
 enum SidebarItem: Hashable {
     case transfers(TransferFilter)
@@ -80,6 +81,7 @@ final class AppModel {
     func start() {
         server.start()
         torrents.start()
+        startWidgetUpdates()
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(45))
             self?.packStaleItems()
@@ -131,13 +133,14 @@ final class AppModel {
         if !urls.contains(where: Self.isAppLink) { selection = .transfers(.all) }
     }
 
-    /// `piece://show/films`, `piece://search?q=…`, `piece://play?hash=…`, `piece://stop`, `piece://inspect?hash=…`
+    /// `piece://shelf?q=…`, `piece://show/films`, `piece://search?q=…`, `piece://play?hash=…`, `piece://stop`, `piece://inspect?hash=…`
     private func handleDeepLink(_ url: URL) {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
         switch url.host?.lowercased() {
         case "show":
             switch url.lastPathComponent.lowercased() {
+            case "shelf": selection = .shelf
             case "films": selection = .films
             case "tv": selection = .tv
             case "music": selection = .music
@@ -146,6 +149,9 @@ final class AppModel {
             case "sources": selection = .sources
             default: selection = .transfers(.all)
             }
+        case "shelf":
+            selection = .shelf
+            shelfQuery = value("q") ?? ""
         case "search":
             selection = .search
             search.query = value("q") ?? ""
@@ -312,5 +318,42 @@ final class AppModel {
             let files = await torrents.files(for: torrent.id)
             library.importTorrent(name: torrent.name, savePath: torrent.savePath, files: files.filter(\.isComplete), hash: torrent.id)
         }
+    }
+}
+
+// MARK: - Widget
+
+extension AppModel {
+    /// Shares a summary with the Piece widget about every 15 seconds, only touching disk when something changed.
+    func startWidgetUpdates() {
+        guard !AppPaths.isTesting, !DemoTorrents.isEnabled, WidgetSnapshot.fileURL != nil else { return }
+        Task { [weak self] in
+            var last: WidgetSnapshot?
+            while let self {
+                var snapshot = self.makeWidgetSnapshot()
+                snapshot.updated = last?.updated ?? snapshot.updated
+                if snapshot != last {
+                    snapshot.updated = Date()
+                    snapshot.write()
+                    WidgetCenter.shared.reloadAllTimelines()
+                    last = snapshot
+                }
+                try? await Task.sleep(for: .seconds(15))
+            }
+        }
+    }
+
+    private func makeWidgetSnapshot() -> WidgetSnapshot {
+        let active = torrents.torrents.filter { !$0.isComplete }
+        return WidgetSnapshot(
+            downloadRate: torrents.downloadRate, uploadRate: torrents.uploadRate, activeCount: active.count,
+            transfers: active.prefix(4).map {
+                .init(id: $0.id, name: $0.name, progress: $0.progress, status: $0.statusLine, isPaused: $0.phase == .paused)
+            },
+            recents: library.items.filter { $0.kind != .track }.sorted { $0.dateAdded > $1.dateAdded }.prefix(4).map {
+                .init(id: $0.id.uuidString, title: $0.kind == .episode ? ($0.showTitle ?? $0.title) : $0.title,
+                      subtitle: $0.kind == .episode ? $0.episodeCode : $0.yearText, kind: $0.kind.rawValue)
+            },
+            savedBytes: compression.totalSaved)
     }
 }

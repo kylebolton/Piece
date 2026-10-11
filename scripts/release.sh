@@ -39,6 +39,17 @@ if [ -d "$SPARKLE" ]; then
   sign dist/Piece.app/Contents/Frameworks/Sparkle.framework
 fi
 for helper in dist/Piece.app/Contents/Helpers/*; do sign "$helper"; done
+# The widget shares data through an App Group, which needs a Developer ID provisioning profile (WIDGET_PROFILE=path).
+# Without one it still runs sandboxed but shows an empty snapshot.
+for extension in dist/Piece.app/Contents/PlugIns/*.appex; do
+  [ -e "$extension" ] || continue
+  WIDGET_ENTITLEMENTS=Sources/PieceWidget/PieceWidget.entitlements
+  if [ -n "${WIDGET_PROFILE:-}" ]; then
+    cp "$WIDGET_PROFILE" "$extension/Contents/embedded.provisionprofile"
+    WIDGET_ENTITLEMENTS=Sources/PieceWidget/PieceWidget.release.entitlements
+  fi
+  sign --entitlements "$WIDGET_ENTITLEMENTS" "$extension"
+done
 sign --entitlements "$ENTITLEMENTS" dist/Piece.app
 [ "$IDENTITY" = "-" ] || codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" dist/Piece.app
 
