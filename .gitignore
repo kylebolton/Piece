@@ -8,3 +8,5 @@ xcuserdata/
 .swiftpm/
 .build/
 dist/
+Sources/KTorrent/Support/BuiltInKeys.swift
+.updates/

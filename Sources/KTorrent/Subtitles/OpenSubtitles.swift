@@ -58,7 +58,8 @@ final class OpenSubtitles {
     }
 
     private func request(_ path: String, query: [String: String] = [:], body: [String: Any]? = nil) throws -> URLRequest {
-        let key = AppSettings.shared.openSubtitlesKey.trimmingCharacters(in: .whitespaces)
+        let own = AppSettings.shared.openSubtitlesKey.trimmingCharacters(in: .whitespaces)
+        let key = own.isEmpty ? BuiltInKeys.openSubtitles : own
         guard !key.isEmpty else { throw OpenSubtitlesError.missingKey }
         var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty {

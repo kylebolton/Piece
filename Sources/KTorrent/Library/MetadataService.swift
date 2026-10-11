@@ -16,7 +16,10 @@ struct MetadataMatch: Identifiable, Hashable {
 
 /// Looks up film, TV and album details. Uses TMDB when a key is set, otherwise the keyless iTunes Search API.
 enum MetadataService {
-    private static var tmdbKey: String { AppSettings.shared.tmdbKey.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private static var tmdbKey: String {
+        let own = AppSettings.shared.tmdbKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return own.isEmpty ? BuiltInKeys.tmdb : own
+    }
     static var hasTMDB: Bool { !tmdbKey.isEmpty }
 
     // MARK: - Public lookups

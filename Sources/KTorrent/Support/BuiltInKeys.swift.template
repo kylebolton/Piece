@@ -1,0 +1,7 @@
+/// API credentials shipped with the app. A key the user enters in Settings takes precedence.
+/// This file is git-ignored; copy BuiltInKeys.swift.template to recreate it.
+enum BuiltInKeys {
+    /// TMDB read-only access token.
+    static let tmdb = ""
+    static let openSubtitles = ""
+}
