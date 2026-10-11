@@ -1,14 +1,14 @@
 <?xml version="1.0" standalone="yes"?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
-        <title>Swarmly</title>
+        <title>Piece</title>
         <item>
-            <title>1.1.1</title>
-            <pubDate>Sun, 11 Oct 2026 17:41:48 +0100</pubDate>
-            <sparkle:version>6</sparkle:version>
-            <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
+            <title>1.2.0</title>
+            <pubDate>Sun, 11 Oct 2026 19:20:27 +0100</pubDate>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>1.2.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/kylebolton/Swarmly/releases/download/v1.1.1/Swarmly-1.1.1.zip" length="154573010" type="application/octet-stream" sparkle:edSignature="pBhIjaqT5CKq+JJkBEvpZDzvlRnPfCFXt6+3WO0lEXBSPl7mctv01yXAloxR+O/bbRfLFtzl2bKz9EXKJU3BBg=="/>
+            <enclosure url="https://github.com/kylebolton/Piece/releases/download/v1.2.0/Piece-1.2.0.zip" length="156497050" type="application/octet-stream" sparkle:edSignature="0UzwjcpHAFBIHTBOdzTAUwnG9NzfkDkEKTJ4eLLfP/+pZCdMLdvY+bYTnIX4P1fjL7CaJ0bZxra2qfzpxIMlCA=="/>
         </item>
     </channel>
 </rss>
