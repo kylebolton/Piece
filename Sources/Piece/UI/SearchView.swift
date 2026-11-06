@@ -303,7 +303,7 @@ private struct SourceChip: View {
             .font(.caption.weight(.medium))
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
-            .background(provider.isEnabled ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06), in: Capsule())
+            .liquidGlassEffect(type: .chip(tint: provider.isEnabled ? .accentColor : nil), interactive: true)
             .foregroundStyle(provider.isEnabled ? Color.accentColor : Color.secondary)
         }
         .buttonStyle(.plain)

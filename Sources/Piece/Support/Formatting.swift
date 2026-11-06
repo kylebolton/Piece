@@ -16,6 +16,18 @@ enum Format {
         bytesPerSecond <= 0 ? "0 KB/s" : "\(bytes(Int64(bytesPerSecond)))/s"
     }
 
+    /// Always one decimal place ("0.8 KB/s", "12.0 MB/s"), so the text width only
+    /// changes when the unit or the number of whole digits changes.
+    static func fixedRate(_ bytesPerSecond: Int) -> String {
+        var value = Double(max(0, bytesPerSecond)) / 1000
+        var unit = "KB"
+        for next in ["MB", "GB"] where value >= 999.95 {
+            value /= 1000
+            unit = next
+        }
+        return String(format: "%.1f %@/s", value, unit)
+    }
+
     static func percent(_ fraction: Double) -> String {
         let clamped = min(max(fraction, 0), 1)
         return clamped >= 0.9995 ? "100%" : String(format: "%.1f%%", clamped * 100)

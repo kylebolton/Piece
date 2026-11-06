@@ -3,13 +3,24 @@ import SwiftUI
 struct SettingsView: View {
     var body: some View {
         TabView {
-            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
-            NetworkSettings().tabItem { Label("Network", systemImage: "network") }
-            SubtitleSettings().tabItem { Label("Subtitles", systemImage: "captions.bubble") }
-            LibrarySettings().tabItem { Label("Library", systemImage: "books.vertical") }
-            StorageSettings().tabItem { Label("Storage", systemImage: "internaldrive") }
+            GeneralSettings().settingsPane().tabItem { Label("General", systemImage: "gearshape") }
+            NetworkSettings().settingsPane().tabItem { Label("Network", systemImage: "network") }
+            SubtitleSettings().settingsPane().tabItem { Label("Subtitles", systemImage: "captions.bubble") }
+            LibrarySettings().settingsPane().tabItem { Label("Library", systemImage: "books.vertical") }
+            StorageSettings().settingsPane().tabItem { Label("Storage", systemImage: "internaldrive") }
         }
-        .frame(width: 520)
+    }
+}
+
+private extension View {
+    /// Settings tabs are grouped Forms, which scroll and so report no height of
+    /// their own. Turning scrolling off and fixing the vertical size makes each
+    /// tab as tall as its content, and the Settings window resizes to fit it
+    /// whenever the tab changes.
+    func settingsPane() -> some View {
+        frame(width: 520)
+            .scrollDisabled(true)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -96,6 +107,7 @@ private struct NetworkSettings: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 90)
                 .multilineTextAlignment(.trailing)
+                .monospacedDigit()
             Text("KB/s").foregroundStyle(.secondary)
         }
     }

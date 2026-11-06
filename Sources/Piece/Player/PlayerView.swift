@@ -112,7 +112,7 @@ struct PlayerWindow: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .glassBackground(in: Capsule())
+                .liquidGlassEffect(type: .overlay)
                 .environment(\.colorScheme, .dark)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(12)
@@ -212,7 +212,7 @@ struct PlayerWindow: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .glassBackground(in: Capsule())
+                .liquidGlassEffect(type: .overlay)
                 .environment(\.colorScheme, .dark)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -222,7 +222,7 @@ struct PlayerWindow: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .glassBackground(in: Capsule())
+                    .liquidGlassEffect(type: .overlay)
                     .environment(\.colorScheme, .dark)
             }
         }
@@ -241,7 +241,7 @@ struct PlayerWindow: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 28)
         .padding(.vertical, 20)
-        .glassBackground(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .liquidGlassEffect(type: .card(cornerRadius: 18))
         .environment(\.colorScheme, .dark)
         .allowsHitTesting(false)
     }

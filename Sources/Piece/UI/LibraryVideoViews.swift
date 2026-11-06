@@ -141,8 +141,9 @@ struct PosterCell: View {
                                 .font(.system(size: 9, weight: .bold))
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 2)
-                                .background(.black.opacity(0.6), in: Capsule())
+                                .liquidGlassEffect(type: .scrim(opacity: 0.6))
                                 .foregroundStyle(.white)
+                                .environment(\.colorScheme, .dark)
                                 .padding(6)
                         }
                     }
@@ -237,7 +238,7 @@ struct MediaDetailSheet: View {
                             Label(item.playPosition > 30 && !item.isWatched ? "Resume" : "Play", systemImage: "play.fill")
                                 .frame(minWidth: 80)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .liquidGlassButtonStyle(prominent: true)
                         .controlSize(.large)
                         .keyboardShortcut(.defaultAction)
 
@@ -246,6 +247,7 @@ struct MediaDetailSheet: View {
                                 app.play(item, fromStart: true)
                                 dismiss()
                             }
+                            .liquidGlassButtonStyle()
                             .controlSize(.large)
                             Text("\(Format.duration(item.playPosition)) watched").font(.caption).foregroundStyle(.secondary)
                         }
@@ -487,8 +489,9 @@ struct ShowDetailView: View {
                         .font(.callout.weight(.medium))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(.black.opacity(0.45), in: Capsule())
+                        .liquidGlassEffect(type: .scrim(opacity: 0.45), interactive: true)
                         .foregroundStyle(.white)
+                        .environment(\.colorScheme, .dark)
                 }
                 .buttonStyle(.plain)
                 .padding(12)

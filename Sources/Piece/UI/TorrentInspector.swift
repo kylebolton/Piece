@@ -93,7 +93,7 @@ private struct OverviewTab: View {
                         AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { value in
                             AxisGridLine()
                             AxisValueLabel {
-                                if let rate = value.as(Int.self) { Text(Format.rate(rate)).font(.caption2) }
+                                if let rate = value.as(Int.self) { Text(Format.rate(rate)).font(.caption2).monospacedDigit() }
                             }
                         }
                     }

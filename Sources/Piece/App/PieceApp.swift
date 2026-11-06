@@ -71,7 +71,7 @@ private struct MenuBarLabel: View {
         let active = torrents.downloadRate > 0 || torrents.uploadRate > 0
         HStack(spacing: 3) {
             Image(systemName: active ? "arrow.down.circle.fill" : "arrow.down.circle")
-            if torrents.downloadRate > 0 { Text(Format.rate(torrents.downloadRate)) }
+            if torrents.downloadRate > 0 { Text(Format.fixedRate(torrents.downloadRate)).monospacedDigit() }
         }
     }
 }
