@@ -139,6 +139,12 @@ NS_SWIFT_SENDABLE
           filterTrackers:(NSArray<NSString *> *)filter
          applyToExisting:(BOOL)applyToExisting;
 
+/// Blocks every peer address in the plain-text list at `path` (PeerGuardian, eMule .dat, ranges, CIDR).
+/// Returns the number of rules, 0 when the file has none (the list in force is kept), -1 when it can't be read.
+- (NSInteger)loadBlocklistAtPath:(NSString *)path;
+/// Lets every peer connect again.
+- (void)clearBlocklist;
+
 /// One byte per piece: 1 when the piece has been downloaded and verified.
 - (NSData *)pieceMapForTorrent:(NSString *)infoHash;
 

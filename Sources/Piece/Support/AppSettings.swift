@@ -37,6 +37,15 @@ final class AppSettings {
     private(set) var mergeTrackers: [String] { didSet { defaults.set(mergeTrackers, forKey: "mergeTrackers") } }
     private(set) var filterTrackers: [String] { didSet { defaults.set(filterTrackers, forKey: "filterTrackers") } }
 
+    /// Peers in the blocklist's address ranges are refused.
+    var blocklistEnabled: Bool { didSet { defaults.set(blocklistEnabled, forKey: "blocklistEnabled") } }
+    var blocklistURL: String { didSet { defaults.set(blocklistURL, forKey: "blocklistURL") } }
+    var blocklistAutoUpdate: Bool { didSet { defaults.set(blocklistAutoUpdate, forKey: "blocklistAutoUpdate") } }
+    /// Where the list in force came from (a web address or a file name), its rule count and when it was installed.
+    var blocklistSource: String { didSet { defaults.set(blocklistSource, forKey: "blocklistSource") } }
+    var blocklistRuleCount: Int { didSet { defaults.set(blocklistRuleCount, forKey: "blocklistRuleCount") } }
+    var blocklistUpdated: Date? { didSet { defaults.set(blocklistUpdated, forKey: "blocklistUpdated") } }
+
     var openSubtitlesKey: String { didSet { Keychain.set(openSubtitlesKey, for: "openSubtitlesKey") } }
     var openSubtitlesUser: String { didSet { defaults.set(openSubtitlesUser, forKey: "openSubtitlesUser") } }
     var openSubtitlesPassword: String { didSet { Keychain.set(openSubtitlesPassword, for: "openSubtitlesPassword") } }
@@ -59,6 +68,7 @@ final class AppSettings {
             "subtitleLanguages": [Locale.current.language.languageCode?.identifier ?? "en"],
             "autoLoadSubtitles": true,
             "subtitleFontScale": 1.0,
+            "blocklistAutoUpdate": true,
         ])
         downloadFolder = defaults.string(forKey: "downloadFolder") ?? downloads
         listenPort = defaults.integer(forKey: "listenPort")
@@ -80,6 +90,12 @@ final class AppSettings {
         subtitleFontScale = defaults.double(forKey: "subtitleFontScale")
         mergeTrackers = defaults.stringArray(forKey: "mergeTrackers") ?? []
         filterTrackers = defaults.stringArray(forKey: "filterTrackers") ?? []
+        blocklistEnabled = defaults.bool(forKey: "blocklistEnabled")
+        blocklistURL = defaults.string(forKey: "blocklistURL") ?? ""
+        blocklistAutoUpdate = defaults.bool(forKey: "blocklistAutoUpdate")
+        blocklistSource = defaults.string(forKey: "blocklistSource") ?? ""
+        blocklistRuleCount = defaults.integer(forKey: "blocklistRuleCount")
+        blocklistUpdated = defaults.object(forKey: "blocklistUpdated") as? Date
         openSubtitlesKey = Keychain.get("openSubtitlesKey")
         openSubtitlesUser = defaults.string(forKey: "openSubtitlesUser") ?? ""
         openSubtitlesPassword = Keychain.get("openSubtitlesPassword")

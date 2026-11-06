@@ -18,6 +18,10 @@
 #include <libtorrent/announce_entry.hpp>
 #include <libtorrent/fingerprint.hpp>
 #include <libtorrent/error_code.hpp>
+#include <libtorrent/ip_filter.hpp>
+#include <libtorrent/address.hpp>
+
+#include <arpa/inet.h>
 
 #include <algorithm>
 #include <atomic>
@@ -127,6 +131,116 @@ void writeFile(const std::string &path, const std::vector<char> &buf) {
     std::rename(tmp.c_str(), path.c_str());
 }
 
+// MARK: - Blocklists
+
+std::string trimmed(const std::string &s) {
+    size_t a = 0, b = s.size();
+    while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
+    while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
+    return s.substr(a, b - a);
+}
+
+/// Parses an IPv4 or IPv6 address. IPv4 octets may carry leading zeros ("001.002.003.004"),
+/// which eMule .dat lists use and inet_pton rejects.
+bool parseAddress(const std::string &text, lt::address &out) {
+    std::string s = trimmed(text);
+    if (s.empty()) return false;
+    if (s.find(':') != std::string::npos) {
+        in6_addr a6;
+        if (inet_pton(AF_INET6, s.c_str(), &a6) != 1) return false;
+        lt::address_v6::bytes_type bytes;
+        std::copy(std::begin(a6.s6_addr), std::end(a6.s6_addr), bytes.begin());
+        out = lt::address_v6(bytes);
+        return true;
+    }
+    unsigned octets[4];
+    size_t pos = 0;
+    for (int i = 0; i < 4; ++i) {
+        size_t start = pos;
+        unsigned v = 0;
+        while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
+            v = v * 10 + static_cast<unsigned>(s[pos] - '0');
+            if (v > 255) return false;
+            ++pos;
+        }
+        if (pos == start) return false;
+        octets[i] = v;
+        if (i < 3) {
+            if (pos >= s.size() || s[pos] != '.') return false;
+            ++pos;
+        }
+    }
+    if (pos != s.size()) return false;
+    out = lt::address_v4({{static_cast<unsigned char>(octets[0]), static_cast<unsigned char>(octets[1]),
+                           static_cast<unsigned char>(octets[2]), static_cast<unsigned char>(octets[3])}});
+    return true;
+}
+
+bool parseRange(const std::string &text, lt::address &first, lt::address &last) {
+    size_t dash = text.find('-');
+    if (dash == std::string::npos) return false;
+    return parseAddress(text.substr(0, dash), first) && parseAddress(text.substr(dash + 1), last);
+}
+
+bool parseCIDR(const std::string &text, lt::address &first, lt::address &last) {
+    size_t slash = text.find('/');
+    if (slash == std::string::npos) return false;
+    lt::address base;
+    if (!parseAddress(text.substr(0, slash), base)) return false;
+    std::string bitsText = trimmed(text.substr(slash + 1));
+    if (bitsText.empty() || bitsText.size() > 3) return false;
+    for (char c : bitsText) if (!std::isdigit(static_cast<unsigned char>(c))) return false;
+    int bits = std::stoi(bitsText);
+    if (base.is_v4()) {
+        if (bits > 32) return false;
+        uint32_t ip = base.to_v4().to_uint();
+        uint32_t mask = bits == 0 ? 0 : ~uint32_t(0) << (32 - bits);
+        first = lt::address_v4(ip & mask);
+        last = lt::address_v4(ip | ~mask);
+    } else {
+        if (bits > 128) return false;
+        auto lo = base.to_v6().to_bytes();
+        auto hi = lo;
+        for (int i = 0; i < 16; ++i) {
+            int keep = std::max(0, std::min(8, bits - i * 8));
+            unsigned char mask = static_cast<unsigned char>(0xFF << (8 - keep));
+            lo[i] &= mask;
+            hi[i] |= static_cast<unsigned char>(~mask);
+        }
+        first = lt::address_v6(lo);
+        last = lt::address_v6(hi);
+    }
+    return true;
+}
+
+/// Reads one blocklist line. Understands the PeerGuardian text format ("Name:1.2.3.4-1.2.3.9", what
+/// Transmission lists use), eMule .dat ("1.2.3.4 - 1.2.3.9 , 000 , Name"), and bare ranges, CIDR
+/// blocks and single addresses. Returns NO for comments, blank lines and anything unrecognised.
+bool parseBlocklistLine(const std::string &raw, lt::address &first, lt::address &last) {
+    std::string line = trimmed(raw);
+    if (line.empty() || line[0] == '#' || line[0] == ';' || line.compare(0, 2, "//") == 0) return NO;
+
+    // eMule .dat: the access level follows the range, and 128 or more means "allowed".
+    size_t comma = line.find(',');
+    if (comma != std::string::npos) {
+        if (!parseRange(line.substr(0, comma), first, last)) return NO;
+        size_t next = line.find(',', comma + 1);
+        std::string level = trimmed(line.substr(comma + 1, next == std::string::npos ? std::string::npos : next - comma - 1));
+        if (!level.empty() && std::all_of(level.begin(), level.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); })
+            && level.size() <= 4 && std::stoi(level) >= 128) return NO;
+        return YES;
+    }
+    if (parseRange(line, first, last) || parseCIDR(line, first, last)) return YES;
+    if (parseAddress(line, first)) { last = first; return YES; }
+
+    // PeerGuardian: the name can contain colons, so try each one as the start of the range.
+    for (size_t colon = line.find(':'); colon != std::string::npos; colon = line.find(':', colon + 1)) {
+        std::string rest = line.substr(colon + 1);
+        if (parseRange(rest, first, last)) return YES;
+    }
+    return NO;
+}
+
 lt::settings_pack makePack(KTSessionSettings *s) {
     lt::settings_pack p;
     p.set_int(lt::settings_pack::alert_mask,
@@ -211,6 +325,38 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     // libtorrent throws when a handle has gone away; never let that unwind into Swift.
     try {
         _session->apply_settings(makePack(settings));
+    } catch (const std::exception &) {
+    }
+}
+
+- (NSInteger)loadBlocklistAtPath:(NSString *)path {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        std::ifstream file(path.fileSystemRepresentation, std::ios::binary);
+        if (!file) return -1;
+        lt::ip_filter filter;
+        NSInteger rules = 0;
+        std::string line;
+        while (std::getline(file, line)) {
+            lt::address first, last;
+            if (!parseBlocklistLine(line, first, last)) continue;
+            if (first.is_v4() != last.is_v4()) continue;
+            if (last < first) std::swap(first, last);
+            filter.add_rule(first, last, lt::ip_filter::blocked);
+            ++rules;
+        }
+        // An empty or unreadable list never replaces the one in force.
+        if (rules == 0) return 0;
+        _session->set_ip_filter(std::move(filter));
+        return rules;
+    } catch (const std::exception &) {
+    }
+    return -1;
+}
+
+- (void)clearBlocklist {
+    try {
+        _session->set_ip_filter(lt::ip_filter());
     } catch (const std::exception &) {
     }
 }
