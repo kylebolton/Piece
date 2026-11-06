@@ -201,3 +201,35 @@ final class StreamingUnitTests: XCTestCase {
         XCTAssertFalse(HLSSession.masterPlaylist(subtitleName: nil, language: nil).contains("SUBTITLES"))
     }
 }
+
+final class TrackerListTests: XCTestCase {
+    func testParseSkipsCommentsAndBlankLines() {
+        let text = """
+        # Best trackers
+        udp://tracker.opentrackr.org:1337/announce
+
+          https://tracker.example.org/announce   # trailing comment
+        #udp://disabled.example.org:80
+        \r
+        udp://open.stealth.si:80/announce\r
+        """
+        XCTAssertEqual(TrackerList.parse(text), [
+            "udp://tracker.opentrackr.org:1337/announce",
+            "https://tracker.example.org/announce",
+            "udp://open.stealth.si:80/announce",
+        ])
+    }
+
+    func testKeyIgnoresCaseAndTrailingSlash() {
+        XCTAssertEqual(TrackerList.key(" UDP://Tracker.Example.org:80/announce/ "),
+                       TrackerList.key("udp://tracker.example.org:80/announce"))
+    }
+
+    func testValidity() {
+        XCTAssertTrue(TrackerList.isValid("udp://tracker.example.org:1337/announce"))
+        XCTAssertTrue(TrackerList.isValid("wss://tracker.example.org"))
+        XCTAssertFalse(TrackerList.isValid("tracker.example.org:1337"))
+        XCTAssertFalse(TrackerList.isValid("ftp://tracker.example.org"))
+        XCTAssertFalse(TrackerList.isValid("udp://"))
+    }
+}

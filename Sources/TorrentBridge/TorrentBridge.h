@@ -130,6 +130,15 @@ NS_SWIFT_SENDABLE
 - (NSArray<KTTrackerInfo *> *)trackersForTorrent:(NSString *)infoHash;
 - (void)setPriority:(int)priority forFile:(int)fileIndex inTorrent:(NSString *)infoHash;
 
+/// Returns NO when the torrent already announces to that tracker.
+- (BOOL)addTracker:(NSString *)url toTorrent:(NSString *)infoHash;
+- (void)removeTracker:(NSString *)url fromTorrent:(NSString *)infoHash;
+/// Trackers added to every torrent (`merge`) and stripped from every torrent (`filter`).
+/// Torrents added from now on always follow them; current ones only when `applyToExisting` is set.
+- (void)setMergeTrackers:(NSArray<NSString *> *)merge
+          filterTrackers:(NSArray<NSString *> *)filter
+         applyToExisting:(BOOL)applyToExisting;
+
 /// One byte per piece: 1 when the piece has been downloaded and verified.
 - (NSData *)pieceMapForTorrent:(NSString *)infoHash;
 

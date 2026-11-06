@@ -33,6 +33,10 @@ final class AppSettings {
     var autoLoadSubtitles: Bool { didSet { defaults.set(autoLoadSubtitles, forKey: "autoLoadSubtitles") } }
     var subtitleFontScale: Double { didSet { defaults.set(subtitleFontScale, forKey: "subtitleFontScale") } }
 
+    /// Trackers added to every transfer, and trackers removed from every transfer. Never overlapping.
+    private(set) var mergeTrackers: [String] { didSet { defaults.set(mergeTrackers, forKey: "mergeTrackers") } }
+    private(set) var filterTrackers: [String] { didSet { defaults.set(filterTrackers, forKey: "filterTrackers") } }
+
     var openSubtitlesKey: String { didSet { Keychain.set(openSubtitlesKey, for: "openSubtitlesKey") } }
     var openSubtitlesUser: String { didSet { defaults.set(openSubtitlesUser, forKey: "openSubtitlesUser") } }
     var openSubtitlesPassword: String { didSet { Keychain.set(openSubtitlesPassword, for: "openSubtitlesPassword") } }
@@ -74,10 +78,48 @@ final class AppSettings {
         subtitleLanguages = defaults.stringArray(forKey: "subtitleLanguages") ?? ["en"]
         autoLoadSubtitles = defaults.bool(forKey: "autoLoadSubtitles")
         subtitleFontScale = defaults.double(forKey: "subtitleFontScale")
+        mergeTrackers = defaults.stringArray(forKey: "mergeTrackers") ?? []
+        filterTrackers = defaults.stringArray(forKey: "filterTrackers") ?? []
         openSubtitlesKey = Keychain.get("openSubtitlesKey")
         openSubtitlesUser = defaults.string(forKey: "openSubtitlesUser") ?? ""
         openSubtitlesPassword = Keychain.get("openSubtitlesPassword")
         tmdbKey = Keychain.get("tmdbKey")
+    }
+
+    func trackers(_ rule: TrackerRule) -> [String] {
+        rule == .merge ? mergeTrackers : filterTrackers
+    }
+
+    /// Adds the trackers that aren't in the list yet and takes them out of the other list.
+    @discardableResult
+    func addTrackers(_ urls: [String], to rule: TrackerRule) -> TrackerImportResult {
+        var result = TrackerImportResult()
+        var list = trackers(rule)
+        var keys = Set(list.map(TrackerList.key))
+        var added = Set<String>()
+        for raw in urls {
+            let url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard TrackerList.isValid(url) else { result.invalid += 1; continue }
+            let key = TrackerList.key(url)
+            guard keys.insert(key).inserted else { result.duplicates += 1; continue }
+            list.append(url)
+            added.insert(key)
+            result.added += 1
+        }
+        guard !added.isEmpty else { return result }
+        let other = trackers(rule == .merge ? .filter : .merge).filter { !added.contains(TrackerList.key($0)) }
+        switch rule {
+        case .merge: mergeTrackers = list; if other.count != filterTrackers.count { filterTrackers = other }
+        case .filter: filterTrackers = list; if other.count != mergeTrackers.count { mergeTrackers = other }
+        }
+        return result
+    }
+
+    func removeTrackers(_ urls: Set<String>, from rule: TrackerRule) {
+        switch rule {
+        case .merge: mergeTrackers.removeAll { urls.contains($0) }
+        case .filter: filterTrackers.removeAll { urls.contains($0) }
+        }
     }
 
     var sessionSettings: KTSessionSettings {

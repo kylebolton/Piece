@@ -24,6 +24,9 @@ final class TorrentStore {
     init(settings: AppSettings) {
         let state = AppPaths.directory("State").path
         session = KTSession(stateDirectory: state, settings: settings.sessionSettings)
+        // Restored transfers keep whatever trackers they were saved with; the rules were applied
+        // when they were added, or when the rules last changed.
+        session.setMergeTrackers(settings.trackers(.merge), filterTrackers: settings.trackers(.filter), applyToExisting: false)
     }
 
     func start() {
@@ -53,6 +56,13 @@ final class TorrentStore {
         let s = settings.sessionSettings
         let session = session
         queue.async { session.apply(s) }
+    }
+
+    /// Pushes the app-wide tracker lists to the engine and applies them to every current transfer.
+    func applyTrackerRules(_ settings: AppSettings) {
+        let merge = settings.trackers(.merge), filter = settings.trackers(.filter)
+        let session = session
+        queue.async { session.setMergeTrackers(merge, filterTrackers: filter, applyToExisting: true) }
     }
 
     func torrent(_ id: String) -> Torrent? { byID[id] }
@@ -247,6 +257,24 @@ final class TorrentStore {
                                    leechers: Int($0.leechers), working: $0.working, updating: $0.updating)
                 }
                 continuation.resume(returning: trackers)
+            }
+        }
+    }
+
+    /// Returns false when the transfer already has that tracker.
+    func addTracker(_ url: String, to id: String) async -> Bool {
+        let session = session
+        return await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: session.addTracker(url, toTorrent: id)) }
+        }
+    }
+
+    func removeTracker(_ url: String, from id: String) async {
+        let session = session
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            queue.async {
+                session.removeTracker(url, fromTorrent: id)
+                continuation.resume()
             }
         }
     }

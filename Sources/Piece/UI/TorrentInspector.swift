@@ -309,6 +309,7 @@ private struct TrackersTab: View {
     @Environment(AppModel.self) private var app
     var torrent: Torrent
     @State private var trackers: [TorrentTracker] = []
+    @State private var isAdding = false
 
     var body: some View {
         Group {
@@ -331,20 +332,60 @@ private struct TrackersTab: View {
                         }
                     }
                     .help(tracker.url)
+                    .contextMenu {
+                        Button("Copy Address") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(tracker.url, forType: .string)
+                        }
+                        Divider()
+                        Button("Remove Tracker", role: .destructive) { remove(tracker) }
+                    }
                 }
                 .listStyle(.plain)
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Button("Ask for More Peers") { app.torrents.reannounce(torrent) }
-                .controlSize(.small)
-                .padding(10)
+            HStack {
+                Button("Ask for More Peers") { app.torrents.reannounce(torrent) }
+                Spacer()
+                Button {
+                    isAdding = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .help("Add Tracker")
+                .accessibilityLabel("Add Tracker")
+                .popover(isPresented: $isAdding, arrowEdge: .top) {
+                    AddTrackerPopover { url in
+                        isAdding = false
+                        Task {
+                            // A tracker the transfer already has is left as it is.
+                            _ = await app.torrents.addTracker(url, to: torrent.id)
+                            await reload()
+                        }
+                    }
+                }
+            }
+            .controlSize(.small)
+            .padding(10)
         }
         .task(id: torrent.id) {
             while !Task.isCancelled {
-                trackers = await app.torrents.trackers(for: torrent.id)
+                await reload()
                 try? await Task.sleep(for: .seconds(3))
             }
+        }
+    }
+
+    private func reload() async {
+        trackers = await app.torrents.trackers(for: torrent.id)
+    }
+
+    private func remove(_ tracker: TorrentTracker) {
+        trackers.removeAll { $0.id == tracker.id }
+        Task {
+            await app.torrents.removeTracker(tracker.url, from: torrent.id)
+            await reload()
         }
     }
 
@@ -352,5 +393,43 @@ private struct TrackersTab: View {
         if !tracker.message.isEmpty { return tracker.message }
         if tracker.working { return "Working" }
         return tracker.updating ? "Contacting…" : "Waiting"
+    }
+}
+
+/// Form for typing one tracker address; also used by the Trackers settings.
+struct AddTrackerPopover: View {
+    var add: (String) -> Void
+    @State private var address = ""
+    @FocusState private var focused: Bool
+
+    private var trimmed: String { address.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Add Tracker").font(.headline)
+            TextField("Address", text: $address, prompt: Text("udp://tracker.example.org:1337/announce"))
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 300)
+                .focused($focused)
+                .onSubmit(submit)
+            HStack {
+                if !trimmed.isEmpty && !TrackerList.isValid(trimmed) {
+                    Text("Enter a udp, http or https tracker address.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Add", action: submit)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!TrackerList.isValid(trimmed))
+            }
+        }
+        .padding(14)
+        .onAppear { focused = true }
+    }
+
+    private func submit() {
+        guard TrackerList.isValid(trimmed) else { return }
+        add(trimmed)
     }
 }

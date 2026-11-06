@@ -19,12 +19,15 @@
 #include <libtorrent/fingerprint.hpp>
 #include <libtorrent/error_code.hpp>
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -84,6 +87,30 @@ NSError *makeError(const std::string &message) {
                            userInfo:@{NSLocalizedDescriptionKey : toNS(message)}];
 }
 
+/// Two addresses that differ only in case, surrounding spaces or a trailing slash are the same tracker.
+std::string trackerKey(const std::string &url) {
+    std::size_t start = 0, end = url.size();
+    while (start < end && std::isspace(static_cast<unsigned char>(url[start]))) ++start;
+    while (end > start && (std::isspace(static_cast<unsigned char>(url[end - 1])) || url[end - 1] == '/')) --end;
+    std::string key = url.substr(start, end - start);
+    std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return std::tolower(c); });
+    return key;
+}
+
+/// Each added tracker gets its own tier after the existing ones, so it never displaces them.
+lt::announce_entry nextTierEntry(const std::string &url, int &maxTier) {
+    lt::announce_entry entry(url);
+    maxTier = std::min(maxTier + 1, 255);
+    entry.tier = static_cast<std::uint8_t>(maxTier);
+    return entry;
+}
+
+int maxTierOf(const std::vector<lt::announce_entry> &trackers) {
+    int tier = -1;
+    for (const lt::announce_entry &ae : trackers) tier = std::max(tier, static_cast<int>(ae.tier));
+    return tier;
+}
+
 bool readFile(const std::string &path, std::vector<char> &out) {
     std::ifstream f(path, std::ios::binary);
     if (!f) return false;
@@ -121,6 +148,8 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     p.set_int(lt::settings_pack::active_seeds, s.maxActiveSeeds);
     p.set_int(lt::settings_pack::active_limit, s.maxActiveDownloads + s.maxActiveSeeds + 10);
     p.set_int(lt::settings_pack::connections_limit, s.maxConnections);
+    // Merged trackers sit in tiers of their own; without this only the first working tier is used.
+    p.set_bool(lt::settings_pack::announce_to_all_tiers, true);
     int enc = s.requireEncryption ? lt::settings_pack::pe_forced : lt::settings_pack::pe_enabled;
     p.set_int(lt::settings_pack::out_enc_policy, enc);
     p.set_int(lt::settings_pack::in_enc_policy, enc);
@@ -135,6 +164,8 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     std::mutex _mutex;
     std::string _stateDir;
     std::atomic<int> _pendingResume;
+    std::vector<std::string> _mergeTrackers;
+    std::set<std::string> _filterKeys;
 }
 
 - (instancetype)initWithStateDirectory:(NSString *)stateDirectory settings:(KTSessionSettings *)settings {
@@ -244,6 +275,7 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             std::lock_guard<std::mutex> lock(_mutex);
             _handles[hash] = h;
         }
+        [self applyTrackerRulesTo:h];
         h.save_resume_data(lt::torrent_handle::save_info_dict);
         ++_pendingResume;
         return toNS(hash);
@@ -516,6 +548,104 @@ lt::settings_pack makePack(KTSessionSettings *s) {
         h.file_priority(lt::file_index_t(fileIndex), lt::download_priority_t(static_cast<std::uint8_t>(priority)));
     } catch (const std::exception &) {
     }
+}
+
+// MARK: - Trackers
+
+- (void)saveResumeDataFor:(lt::torrent_handle &)h {
+    h.save_resume_data(lt::torrent_handle::save_info_dict);
+    ++_pendingResume;
+}
+
+- (BOOL)addTracker:(NSString *)url toTorrent:(NSString *)infoHash {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        lt::torrent_handle h;
+        if (![self handle:h forHash:infoHash]) return NO;
+        std::string address = url.UTF8String;
+        std::string key = trackerKey(address);
+        if (key.empty()) return NO;
+        std::vector<lt::announce_entry> trackers = h.trackers();
+        for (const lt::announce_entry &ae : trackers)
+            if (trackerKey(ae.url) == key) return NO;
+        int maxTier = maxTierOf(trackers);
+        h.add_tracker(nextTierEntry(address, maxTier));
+        [self saveResumeDataFor:h];
+        return YES;
+    } catch (const std::exception &) {
+    }
+    return NO;
+}
+
+- (void)removeTracker:(NSString *)url fromTorrent:(NSString *)infoHash {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        lt::torrent_handle h;
+        if (![self handle:h forHash:infoHash]) return;
+        std::string key = trackerKey(url.UTF8String);
+        std::vector<lt::announce_entry> trackers = h.trackers();
+        auto end = std::remove_if(trackers.begin(), trackers.end(),
+                                  [&](const lt::announce_entry &ae) { return trackerKey(ae.url) == key; });
+        if (end == trackers.end()) return;
+        trackers.erase(end, trackers.end());
+        h.replace_trackers(trackers);
+        [self saveResumeDataFor:h];
+    } catch (const std::exception &) {
+    }
+}
+
+- (void)setMergeTrackers:(NSArray<NSString *> *)merge
+          filterTrackers:(NSArray<NSString *> *)filter
+         applyToExisting:(BOOL)applyToExisting {
+    std::vector<lt::torrent_handle> handles;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        _mergeTrackers.clear();
+        _filterKeys.clear();
+        for (NSString *url in merge) _mergeTrackers.push_back(url.UTF8String);
+        for (NSString *url in filter) _filterKeys.insert(trackerKey(url.UTF8String));
+        if (applyToExisting)
+            for (auto &entry : _handles) handles.push_back(entry.second);
+    }
+    for (lt::torrent_handle &h : handles) {
+        // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+        try {
+            if (h.is_valid() && [self applyTrackerRulesTo:h]) [self saveResumeDataFor:h];
+        } catch (const std::exception &) {
+        }
+    }
+}
+
+/// Strips filtered trackers and adds the missing merged ones. Returns YES when anything changed.
+- (BOOL)applyTrackerRulesTo:(lt::torrent_handle &)h {
+    std::vector<std::string> merge;
+    std::set<std::string> filter;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        merge = _mergeTrackers;
+        filter = _filterKeys;
+    }
+    if (merge.empty() && filter.empty()) return NO;
+    std::vector<lt::announce_entry> current = h.trackers();
+    std::vector<lt::announce_entry> kept;
+    std::set<std::string> have;
+    for (const lt::announce_entry &ae : current) {
+        std::string key = trackerKey(ae.url);
+        if (filter.count(key)) continue;
+        have.insert(key);
+        kept.push_back(ae);
+    }
+    bool changed = kept.size() != current.size();
+    if (changed) h.replace_trackers(kept);
+    int maxTier = maxTierOf(kept);
+    for (const std::string &url : merge) {
+        std::string key = trackerKey(url);
+        if (key.empty() || have.count(key) || filter.count(key)) continue;
+        h.add_tracker(nextTierEntry(url, maxTier));
+        have.insert(key);
+        changed = true;
+    }
+    return changed;
 }
 
 - (NSData *)pieceMapForTorrent:(NSString *)infoHash {
