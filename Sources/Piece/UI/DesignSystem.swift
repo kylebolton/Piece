@@ -1,6 +1,7 @@
 import AppKit
 import AVKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 extension TorrentPhase {
     var tint: Color {
@@ -304,6 +305,67 @@ extension View {
             self.hidden()
         } else {
             self
+        }
+    }
+}
+
+/// The icon Finder shows for a torrent's download, with its status as a small badge.
+struct TorrentIcon: View {
+    var torrent: Torrent
+    var symbol: String
+    var size: CGFloat = 32
+
+    @State private var icon: NSImage?
+
+    /// Changes whenever the item on disk may have changed kind or name (created, renamed from `.part`).
+    private var lookupKey: String {
+        "\(torrent.savePath)/\(torrent.name)|\(torrent.hasMetadata)|\(torrent.isComplete)"
+    }
+
+    var body: some View {
+        Group {
+            if let icon {
+                Image(nsImage: icon).resizable().interpolation(.high)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay(alignment: .bottomTrailing) {
+            let badge = size * 0.5
+            Image(systemName: symbol)
+                .font(.system(size: badge * 0.5, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: badge, height: badge)
+                .background(torrent.phase.badgeColor, in: Circle())
+                .padding(1.5)
+                .background(Color(nsColor: .windowBackgroundColor), in: Circle())
+                .offset(x: badge * 0.2, y: badge * 0.15)
+        }
+        .task(id: lookupKey) { icon = FileIcon.forTorrent(torrent) }
+    }
+}
+
+enum FileIcon {
+    /// What Finder shows for the torrent's top-level item. While it is still downloading
+    /// (as `name.part`) or not on disk yet, falls back to the icon for its type.
+    static func forTorrent(_ torrent: Torrent) -> NSImage {
+        let final = (torrent.savePath as NSString).appendingPathComponent(torrent.name)
+        if FileManager.default.fileExists(atPath: final) { return NSWorkspace.shared.icon(forFile: final) }
+        if let type = UTType(filenameExtension: (torrent.name as NSString).pathExtension), type.isDeclared {
+            return NSWorkspace.shared.icon(for: type)
+        }
+        // A multi-file torrent is saved as a folder named after it.
+        return NSWorkspace.shared.icon(for: torrent.hasMetadata ? .folder : .data)
+    }
+}
+
+extension TorrentPhase {
+    /// Opaque version of `tint`, readable as a filled badge.
+    var badgeColor: Color {
+        switch self {
+        case .paused, .queued: .gray
+        default: tint
         }
     }
 }
