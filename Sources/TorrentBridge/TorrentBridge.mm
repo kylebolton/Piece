@@ -75,16 +75,18 @@ NSString *toNS(const std::string &s) {
     return r ?: @"";
 }
 
-std::string hashString(const lt::torrent_handle &h) {
+/// The id a torrent is known by: its v1 info-hash when it has one, else its (truncated) v2 hash.
+/// `get_best()` alone isn't stable: a hybrid torrent added from a v1 magnet learns its v2 hash with
+/// the metadata, and would change id half-way through.
+std::string hashString(const lt::info_hash_t &ih) {
     std::stringstream ss;
-    ss << h.info_hashes().get_best();
+    if (ih.has_v1()) ss << ih.v1;
+    else ss << ih.get_best();
     return ss.str();
 }
 
-std::string hashString(const lt::info_hash_t &ih) {
-    std::stringstream ss;
-    ss << ih.get_best();
-    return ss.str();
+std::string hashString(const lt::torrent_handle &h) {
+    return hashString(h.info_hashes());
 }
 
 NSError *makeError(const std::string &message) {
@@ -399,6 +401,25 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     return NO;
 }
 
+/// The id `_handles` has this torrent under, falling back to its hash when it isn't (or no longer) there.
+- (std::string)keyFor:(const lt::torrent_handle &)h known:(bool *)known {
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        for (auto &entry : _handles) {
+            if (entry.second == h) {
+                if (known) *known = true;
+                return entry.first;
+            }
+        }
+    }
+    if (known) *known = false;
+    return hashString(h);
+}
+
+- (std::string)keyFor:(const lt::torrent_handle &)h {
+    return [self keyFor:h known:nullptr];
+}
+
 - (void)restoreTorrents {
     // libtorrent throws when a handle has gone away; never let that unwind into Swift.
     try {
@@ -414,8 +435,18 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             [self holdIfNeeded:atp hash:hashString(atp.info_hashes)];
             lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);
             if (ec || !h.is_valid()) continue;
-            std::lock_guard<std::mutex> lock(_mutex);
-            _handles[hashString(h)] = h;
+            std::string key = hashString(h);
+            {
+                std::lock_guard<std::mutex> lock(_mutex);
+                _handles[key] = h;
+            }
+            // Saved by an earlier version under another id: move it to the stable one, so removing the
+            // transfer can't leave a copy behind that brings it back.
+            if (name.stringByDeletingPathExtension.UTF8String != key) {
+                std::remove([dir stringByAppendingPathComponent:name].fileSystemRepresentation);
+                h.save_resume_data(lt::torrent_handle::save_info_dict);
+                ++_pendingResume;
+            }
         }
     } catch (const std::exception &) {
     }
@@ -1063,7 +1094,7 @@ lt::settings_pack makePack(KTSessionSettings *s) {
         if (fs.num_files() != orig.num_files()) return;
         std::vector<std::int64_t> progress;
         h.file_progress(progress, lt::torrent_handle::piece_granularity);
-        std::string hash = hashString(h);
+        std::string hash = [self keyFor:h];
         bool enabled = _partSuffix;
         for (lt::file_index_t i : fs.file_range()) {
             if (fs.pad_file_at(i)) continue;
@@ -1099,8 +1130,9 @@ lt::settings_pack makePack(KTSessionSettings *s) {
 }
 
 - (void)renameFinished:(const lt::torrent_handle &)h file:(lt::file_index_t)index {
+    std::string key = [self keyFor:h];
     std::lock_guard<std::mutex> lock(_renameMutex);
-    _renaming.erase({hashString(h), static_cast<int>(index)});
+    _renaming.erase({key, static_cast<int>(index)});
 }
 
 - (BOOL)hasRenamesInFlightFor:(const std::string &)hash {
@@ -1131,12 +1163,8 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             try {
             if (auto *rd = lt::alert_cast<lt::save_resume_data_alert>(a)) {
                 --_pendingResume;
-                std::string hash = hashString(rd->params.info_hashes);
-                bool known;
-                {
-                    std::lock_guard<std::mutex> lock(_mutex);
-                    known = _handles.count(hash) > 0;
-                }
+                bool known = false;
+                std::string hash = [self keyFor:rd->handle known:&known];
                 // A torrent removed while its save was in flight must not come back at next launch.
                 if (known) {
                     // Save the transfer as the user left it, not as the hold has it.
@@ -1160,11 +1188,11 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             } else if (auto *fin = lt::alert_cast<lt::torrent_finished_alert>(a)) {
                 KTEvent *e = [KTEvent new];
                 e.type = KTEventTypeFinished;
-                e.infoHash = toNS(hashString(fin->handle));
+                e.infoHash = toNS([self keyFor:fin->handle]);
                 e.message = toNS(fin->torrent_name());
                 // The library reads the files as soon as it hears this, so wait until they have their final names.
                 [self reconcilePartNames:fin->handle];
-                if ([self hasRenamesInFlightFor:hashString(fin->handle)]) {
+                if ([self hasRenamesInFlightFor:e.infoHash.UTF8String]) {
                     _deferredFinished[e.infoHash] = e;
                     _deferredSince[e.infoHash] = [NSDate date];
                 } else {
@@ -1178,15 +1206,16 @@ lt::settings_pack makePack(KTSessionSettings *s) {
                 [self reconcilePartNames:sc->handle];
             } else if (auto *fr = lt::alert_cast<lt::file_renamed_alert>(a)) {
                 [self renameFinished:fr->handle file:fr->index];
-                renamed[hashString(fr->handle)] = fr->handle;
-                [self releaseDeferredFinished:out forHash:toNS(hashString(fr->handle)) force:NO];
+                std::string key = [self keyFor:fr->handle];
+                renamed[key] = fr->handle;
+                [self releaseDeferredFinished:out forHash:toNS(key) force:NO];
             } else if (auto *ff = lt::alert_cast<lt::file_rename_failed_alert>(a)) {
                 [self renameFinished:ff->handle file:ff->index];
-                [self releaseDeferredFinished:out forHash:toNS(hashString(ff->handle)) force:NO];
+                [self releaseDeferredFinished:out forHash:toNS([self keyFor:ff->handle]) force:NO];
             } else if (auto *md = lt::alert_cast<lt::metadata_received_alert>(a)) {
                 KTEvent *e = [KTEvent new];
                 e.type = KTEventTypeMetadataReceived;
-                e.infoHash = toNS(hashString(md->handle));
+                e.infoHash = toNS([self keyFor:md->handle]);
                 e.message = toNS(md->torrent_name());
                 [out addObject:e];
                 md->handle.save_resume_data(lt::torrent_handle::save_info_dict);
@@ -1194,13 +1223,13 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             } else if (auto *err = lt::alert_cast<lt::torrent_error_alert>(a)) {
                 KTEvent *e = [KTEvent new];
                 e.type = KTEventTypeError;
-                e.infoHash = toNS(hashString(err->handle));
+                e.infoHash = toNS([self keyFor:err->handle]);
                 e.message = toNS(err->error.message());
                 [out addObject:e];
             } else if (auto *ferr = lt::alert_cast<lt::file_error_alert>(a)) {
                 KTEvent *e = [KTEvent new];
                 e.type = KTEventTypeError;
-                e.infoHash = toNS(hashString(ferr->handle));
+                e.infoHash = toNS([self keyFor:ferr->handle]);
                 e.message = toNS(ferr->error.message());
                 [out addObject:e];
             }
