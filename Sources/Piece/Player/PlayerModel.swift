@@ -305,7 +305,7 @@ final class PlayerModel {
             guard serial == openSerial else { return }
             let session = HLSSession(server: server)
             let subtitles = wantsSubtitles
-                ? (name: selectedSubtitle?.menuTitle ?? "Subtitles", language: selectedSubtitle?.language, cues: shiftedCues())
+                ? (name: selectedSubtitle?.menuTitle ?? "Subtitles", language: selectedSubtitle?.languageTag, cues: shiftedCues())
                 : nil
             guard session.start(input: toolInput, probe: probe, audioStream: selectedAudioStream, subtitles: subtitles) else {
                 status = .failed("The video converter (ffmpeg) isn't available.")
@@ -460,7 +460,7 @@ final class PlayerModel {
     private func selectLegibleOption(on playerItem: AVPlayerItem) async {
         guard case .hls(withSubtitles: true) = mode,
               let group = try? await playerItem.asset.loadMediaSelectionGroup(for: .legible) else { return }
-        let language = selectedSubtitle?.language
+        let language = selectedSubtitle?.languageTag
         let option = group.options.first { $0.extendedLanguageTag?.hasPrefix(language ?? "\u{0}") == true } ?? group.options.first
         playerItem.select(isExternal ? option : nil, in: group)
     }
@@ -525,7 +525,7 @@ final class PlayerModel {
         for stream in probe?.subtitles ?? [] where MediaProbe.textSubtitleCodecs.contains(stream.codec) {
             tracks.append(SubtitleTrack(
                 id: "embedded:\(stream.index)", name: stream.title ?? "Track \(stream.index)",
-                language: stream.language.flatMap(SubtitleLanguage.code(for:)),
+                language: SubtitleLanguage.identify(tag: stream.language, title: stream.title),
                 detail: stream.title ?? "Embedded", source: .embedded(streamIndex: stream.index)))
         }
         guard generation == self.generation else { return }
@@ -533,11 +533,10 @@ final class PlayerModel {
 
         let settings = AppSettings.shared
         guard settings.autoLoadSubtitles else { return }
-        for language in settings.subtitleLanguages {
-            if let track = tracks.first(where: { $0.language == language }) {
-                await select(subtitle: track)
-                return
-            }
+        // Exact matches for any preferred language beat a track that doesn't say which variant it is.
+        if let track = SubtitleLanguage.best(tracks, for: settings.subtitleLanguages, language: \.language) {
+            await select(subtitle: track)
+            return
         }
         let sidecars = tracks.filter { if case .embedded = $0.source { false } else { true } }
         if sidecars.count == 1, sidecars[0].language == nil {

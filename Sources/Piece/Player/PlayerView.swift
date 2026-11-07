@@ -298,11 +298,12 @@ struct SubtitlePanel: View {
                                     Task { await model.select(online: result) }
                                 } label: {
                                     HStack(spacing: 6) {
-                                        Text(result.language.uppercased())
+                                        Text(SubtitleLanguage.badge(for: result.language))
                                             .font(.caption2.weight(.bold))
                                             .padding(.horizontal, 4)
                                             .padding(.vertical, 1)
                                             .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
+                                            .help(SubtitleLanguage.name(for: result.language) ?? result.language)
                                         Text(result.release).font(.caption).lineLimit(1).truncationMode(.middle)
                                         Spacer(minLength: 4)
                                         if result.hashMatch {

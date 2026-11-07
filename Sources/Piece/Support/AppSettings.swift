@@ -38,7 +38,7 @@ final class AppSettings {
     var hideAdultResults: Bool { didSet { defaults.set(hideAdultResults, forKey: "hideAdultResults") } }
     var showMenuBarItem: Bool { didSet { defaults.set(showMenuBarItem, forKey: "showMenuBarItem") } }
 
-    /// ISO 639-1 codes in order of preference, e.g. ["en", "es"].
+    /// Subtitle language ids in order of preference, e.g. ["pt-pt", "en"]. See `SubtitleLanguage`.
     var subtitleLanguages: [String] { didSet { defaults.set(subtitleLanguages, forKey: "subtitleLanguages") } }
     var autoLoadSubtitles: Bool { didSet { defaults.set(autoLoadSubtitles, forKey: "autoLoadSubtitles") } }
     var subtitleFontScale: Double { didSet { defaults.set(subtitleFontScale, forKey: "subtitleFontScale") } }
@@ -76,7 +76,7 @@ final class AppSettings {
             "notifyOnCompletion": true,
             "showMenuBarItem": true,
             "compressOnComplete": true,
-            "subtitleLanguages": [Locale.current.language.languageCode?.identifier ?? "en"],
+            "subtitleLanguages": SubtitleLanguage.defaultPreferences(),
             "autoLoadSubtitles": true,
             "subtitleFontScale": 1.0,
             "blocklistAutoUpdate": true,
@@ -101,7 +101,14 @@ final class AppSettings {
         watchFolder = defaults.string(forKey: "watchFolder") ?? downloads
         watchFolderNotify = defaults.bool(forKey: "watchFolderNotify")
         watchFolderAction = WatchFolderAction(rawValue: defaults.string(forKey: "watchFolderAction") ?? "") ?? .keep
-        subtitleLanguages = defaults.stringArray(forKey: "subtitleLanguages") ?? ["en"]
+        let storedLanguages = defaults.stringArray(forKey: "subtitleLanguages") ?? []
+        // Version 2 tells regional variants apart ("pt-pt", "pt-br"); version 1 stored bare ISO 639-1 codes.
+        let languages = defaults.integer(forKey: "subtitleLanguagesVersion") < 2
+            ? SubtitleLanguage.migrate(storedLanguages)
+            : SubtitleLanguage.validated(storedLanguages)
+        if languages != storedLanguages { defaults.set(languages, forKey: "subtitleLanguages") }
+        defaults.set(2, forKey: "subtitleLanguagesVersion")
+        subtitleLanguages = languages
         autoLoadSubtitles = defaults.bool(forKey: "autoLoadSubtitles")
         subtitleFontScale = defaults.double(forKey: "subtitleFontScale")
         mergeTrackers = defaults.stringArray(forKey: "mergeTrackers") ?? []

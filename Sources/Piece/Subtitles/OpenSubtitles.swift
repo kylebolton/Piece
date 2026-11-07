@@ -98,6 +98,7 @@ final class OpenSubtitles {
         token = (try? await send(request))?["token"] as? String
     }
 
+    /// `languages` are subtitle language ids in order of preference; see `SubtitleLanguage.searchCodes(for:)`.
     func search(query: String?, movieHash: String?, season: Int? = nil, episode: Int? = nil,
                 year: Int? = nil, languages: [String]) async throws -> [OnlineSubtitle] {
         var params: [String: String] = [:]
@@ -106,16 +107,27 @@ final class OpenSubtitles {
         if let season { params["season_number"] = String(season) }
         if let episode { params["episode_number"] = String(episode) }
         if let year, season == nil { params["year"] = String(year) }
-        if !languages.isEmpty { params["languages"] = languages.sorted().joined(separator: ",") }
+        let codes = SubtitleLanguage.searchCodes(for: languages)
+        if !codes.isEmpty { params["languages"] = codes.joined(separator: ",") }
         guard params["query"] != nil || params["moviehash"] != nil else { return [] }
 
         let json = try await send(try request("subtitles", query: params))
-        return Self.parseResults(json).sorted {
-            if $0.hashMatch != $1.hashMatch { return $0.hashMatch }
-            let l0 = languages.firstIndex(of: $0.language) ?? .max, l1 = languages.firstIndex(of: $1.language) ?? .max
-            if l0 != l1 { return l0 < l1 }
-            return $0.downloads > $1.downloads
-        }
+        return Self.sorted(Self.parseResults(json), for: languages)
+    }
+
+    /// Exact language matches first, then ones that don't say which variant they are; within each, subtitles
+    /// matched to this exact file, then preference order, then popularity.
+    static func sorted(_ results: [OnlineSubtitle], for languages: [String]) -> [OnlineSubtitle] {
+        results.map { (result: $0, rank: SubtitleLanguage.rank($0.language, in: languages)) }
+            .sorted { a, b in
+                let ma = a.rank?.match.rawValue ?? .max, mb = b.rank?.match.rawValue ?? .max
+                if ma != mb { return ma < mb }
+                if a.result.hashMatch != b.result.hashMatch { return a.result.hashMatch }
+                let pa = a.rank?.preference ?? .max, pb = b.rank?.preference ?? .max
+                if pa != pb { return pa < pb }
+                return a.result.downloads > b.result.downloads
+            }
+            .map(\.result)
     }
 
     static func parseResults(_ json: [String: Any]) -> [OnlineSubtitle] {

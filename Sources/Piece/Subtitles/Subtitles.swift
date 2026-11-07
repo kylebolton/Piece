@@ -25,50 +25,10 @@ struct SubtitleTrack: Identifiable, Hashable {
         if let detail, !detail.isEmpty { title += " — \(detail)" }
         return title
     }
-}
 
-enum SubtitleLanguage {
-    /// (ISO 639-1, ISO 639-2 variants, English name)
-    private static let table: [(String, [String], String)] = [
-        ("en", ["eng"], "English"), ("es", ["spa", "esp"], "Spanish"), ("fr", ["fre", "fra"], "French"),
-        ("de", ["ger", "deu"], "German"), ("it", ["ita"], "Italian"), ("pt", ["por", "pob"], "Portuguese"),
-        ("nl", ["dut", "nld"], "Dutch"), ("sv", ["swe"], "Swedish"), ("no", ["nor", "nob"], "Norwegian"),
-        ("da", ["dan"], "Danish"), ("fi", ["fin"], "Finnish"), ("pl", ["pol"], "Polish"),
-        ("ru", ["rus"], "Russian"), ("uk", ["ukr"], "Ukrainian"), ("cs", ["cze", "ces"], "Czech"),
-        ("hu", ["hun"], "Hungarian"), ("ro", ["rum", "ron"], "Romanian"), ("el", ["gre", "ell"], "Greek"),
-        ("tr", ["tur"], "Turkish"), ("ar", ["ara"], "Arabic"), ("he", ["heb"], "Hebrew"),
-        ("hi", ["hin"], "Hindi"), ("ja", ["jpn"], "Japanese"), ("ko", ["kor"], "Korean"),
-        ("zh", ["chi", "zho", "chs", "cht"], "Chinese"), ("vi", ["vie"], "Vietnamese"), ("th", ["tha"], "Thai"),
-        ("id", ["ind"], "Indonesian"), ("bg", ["bul"], "Bulgarian"), ("hr", ["hrv"], "Croatian"),
-        ("sr", ["srp"], "Serbian"), ("sk", ["slo", "slk"], "Slovak"), ("sl", ["slv"], "Slovenian"),
-    ]
-
-    static var all: [(code: String, name: String)] { table.map { ($0.0, $0.2) } }
-
-    /// Normalises "eng", "EN", "English" or "en-US" to "en".
-    static func code(for token: String) -> String? {
-        let t = token.lowercased().split(separator: "-").first.map(String.init) ?? token.lowercased()
-        for (code, alternates, name) in table where t == code || alternates.contains(t) || t == name.lowercased() {
-            return code
-        }
-        return nil
-    }
-
-    static func name(for code: String) -> String? {
-        guard let normalised = Self.code(for: code) else { return nil }
-        return table.first { $0.0 == normalised }?.2
-    }
-
-    /// Guesses the language from a subtitle filename such as "Movie.2019.eng.srt" or "Subs/English.srt".
-    static func guess(fromFilename filename: String) -> String? {
-        let base = ((filename as NSString).lastPathComponent as NSString).deletingPathExtension
-        let tokens = base.split(whereSeparator: { ".-_ []()".contains($0) }).map(String.init)
-        for token in tokens.reversed() where token.count >= 2 {
-            // Two-letter tokens are only trusted at the end ("movie.en.srt"), not mid-title.
-            if token.count == 2, token != tokens.last { continue }
-            if let code = code(for: token) { return code }
-        }
-        return nil
+    /// BCP 47 tag for the track's language, e.g. "pt-BR", for HLS playlists.
+    var languageTag: String? {
+        language.flatMap { SubtitleLanguage[$0]?.tag }
     }
 }
 
