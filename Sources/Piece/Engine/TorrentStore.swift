@@ -25,6 +25,8 @@ final class TorrentStore {
     /// Transfers seen downloading (or fetching metadata) during this run. libtorrent also reports "finished"
     /// for completed torrents it restores at launch; only these ones have really just finished.
     @ObservationIgnored private var seenIncomplete: Set<String> = []
+    /// Removed transfers that a status poll already in flight may still report; kept out until it stops.
+    @ObservationIgnored private var removedIDs: Set<String> = []
 
     init(settings: AppSettings) {
         let state = AppPaths.directory("State").path
@@ -103,7 +105,8 @@ final class TorrentStore {
         var seen = Set<String>()
         var down = 0, up = 0
         var added = false
-        for status in statuses {
+        removedIDs.formIntersection(statuses.map(\.infoHash))
+        for status in statuses where !removedIDs.contains(status.infoHash) {
             seen.insert(status.infoHash)
             let torrent: Torrent
             if let existing = byID[status.infoHash] {
@@ -154,6 +157,7 @@ final class TorrentStore {
         let path = savePath ?? AppSettings.shared.downloadFolder
         do {
             let hash = try session.addMagnet(magnet, savePath: path)
+            removedIDs.remove(hash)
             refresh()
             return hash
         } catch {
@@ -167,6 +171,7 @@ final class TorrentStore {
         let path = savePath ?? AppSettings.shared.downloadFolder
         do {
             let hash = try session.addTorrentData(torrentData, savePath: path)
+            removedIDs.remove(hash)
             refresh()
             return hash
         } catch {
@@ -249,6 +254,7 @@ final class TorrentStore {
 
     func remove(_ torrent: Torrent, deleteFiles: Bool) {
         session.removeTorrent(torrent.id, deleteFiles: deleteFiles)
+        removedIDs.insert(torrent.id)
         torrents.removeAll { $0.id == torrent.id }
         byID[torrent.id] = nil
     }
