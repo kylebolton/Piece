@@ -4,6 +4,7 @@ struct SubtitleSettings: View {
     @Environment(AppModel.self) private var app
     @State private var isAddingLanguage = false
     @State private var dropTarget: String?
+    @State private var isEditingStyle = false
 
     var body: some View {
         @Bindable var settings = app.settings
@@ -13,22 +14,17 @@ struct SubtitleSettings: View {
                     Text("Load subtitles automatically")
                     Text("From the download, inside the video, then OpenSubtitles.")
                 }
-                LabeledContent("Text size") {
-                    HStack(spacing: 10) {
-                        Slider(value: $settings.subtitleFontScale, in: 0.6...1.8) {
-                            Text("Text size")
-                        } minimumValueLabel: {
-                            Text("A").font(.caption)
-                        } maximumValueLabel: {
-                            Text("A").font(.title3)
-                        }
-                        .labelsHidden()
-                        .frame(width: 200)
-                        Text(settings.subtitleFontScale, format: .percent.precision(.fractionLength(0)))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            .frame(width: 40, alignment: .trailing)
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        SubtitleStyleSwatch(style: settings.subtitleStyle)
+                        Button("Customize…") { isEditingStyle = true }
+                            .semitransientPopover(isPresented: $isEditingStyle) {
+                                SubtitleStyleEditor(settings: app.settings)
+                            }
                     }
+                } label: {
+                    Text("Appearance")
+                    Text(styleSummary(settings.subtitleStyle))
                 }
             }
             languagesSection
@@ -56,6 +52,13 @@ struct SubtitleSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// "System Semibold · 100% · White"
+    private func styleSummary(_ style: SubtitleStyle) -> String {
+        [style.fontDescription,
+         style.scale.formatted(.percent.precision(.fractionLength(0))),
+         String(localized: style.color.title)].joined(separator: " · ")
     }
 
     // MARK: - Preferred languages

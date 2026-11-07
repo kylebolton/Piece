@@ -42,6 +42,29 @@ final class AppSettings {
     var subtitleLanguages: [String] { didSet { defaults.set(subtitleLanguages, forKey: "subtitleLanguages") } }
     var autoLoadSubtitles: Bool { didSet { defaults.set(autoLoadSubtitles, forKey: "autoLoadSubtitles") } }
     var subtitleFontScale: Double { didSet { defaults.set(subtitleFontScale, forKey: "subtitleFontScale") } }
+    /// An installed font family for subtitles, or "" for the system font.
+    var subtitleFontFamily: String { didSet { defaults.set(subtitleFontFamily, forKey: "subtitleFontFamily") } }
+    /// See `SubtitleStyle.fontFace`.
+    var subtitleFontFace: String { didSet { defaults.set(subtitleFontFace, forKey: "subtitleFontFace") } }
+    var subtitleTextColor: SubtitleTextColor {
+        didSet { defaults.set(subtitleTextColor.rawValue, forKey: "subtitleTextColor") }
+    }
+    /// "#RRGGBB" for `SubtitleTextColor.custom`.
+    var subtitleCustomColor: String { didSet { defaults.set(subtitleCustomColor, forKey: "subtitleCustomColor") } }
+
+    var subtitleStyle: SubtitleStyle {
+        get {
+            SubtitleStyle(fontFamily: subtitleFontFamily, fontFace: subtitleFontFace, scale: subtitleFontScale,
+                          color: subtitleTextColor, customColor: subtitleCustomColor)
+        }
+        set {
+            subtitleFontFamily = newValue.fontFamily
+            subtitleFontFace = newValue.fontFace
+            subtitleFontScale = newValue.scale
+            subtitleTextColor = newValue.color
+            subtitleCustomColor = newValue.customColor
+        }
+    }
 
     /// Trackers added to every transfer, and trackers removed from every transfer. Never overlapping.
     private(set) var mergeTrackers: [String] { didSet { defaults.set(mergeTrackers, forKey: "mergeTrackers") } }
@@ -79,6 +102,8 @@ final class AppSettings {
             "subtitleLanguages": SubtitleLanguage.defaultPreferences(),
             "autoLoadSubtitles": true,
             "subtitleFontScale": 1.0,
+            "subtitleFontFace": SubtitleTypeface.defaultSystemFace,
+            "subtitleCustomColor": SubtitleStyle.defaultCustomColor,
             "blocklistAutoUpdate": true,
         ])
         downloadFolder = defaults.string(forKey: "downloadFolder") ?? downloads
@@ -111,6 +136,10 @@ final class AppSettings {
         subtitleLanguages = languages
         autoLoadSubtitles = defaults.bool(forKey: "autoLoadSubtitles")
         subtitleFontScale = defaults.double(forKey: "subtitleFontScale")
+        subtitleFontFamily = defaults.string(forKey: "subtitleFontFamily") ?? ""
+        subtitleFontFace = defaults.string(forKey: "subtitleFontFace") ?? SubtitleTypeface.defaultSystemFace
+        subtitleTextColor = SubtitleTextColor(rawValue: defaults.string(forKey: "subtitleTextColor") ?? "") ?? .white
+        subtitleCustomColor = defaults.string(forKey: "subtitleCustomColor") ?? SubtitleStyle.defaultCustomColor
         mergeTrackers = defaults.stringArray(forKey: "mergeTrackers") ?? []
         filterTrackers = defaults.stringArray(forKey: "filterTrackers") ?? []
         blocklistEnabled = defaults.bool(forKey: "blocklistEnabled")

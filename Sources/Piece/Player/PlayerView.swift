@@ -37,10 +37,11 @@ struct PlayerWindow: View {
                 GeometryReader { proxy in
                     VStack {
                         Spacer()
+                        let style = AppSettings.shared.subtitleStyle
                         Text(cue)
-                            .font(.system(size: max(16, proxy.size.height * 0.045) * AppSettings.shared.subtitleFontScale, weight: .semibold))
+                            .font(style.font(size: max(16, proxy.size.height * 0.045) * style.scale))
                             .multilineTextAlignment(.center)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(style.textColor)
                             .shadow(color: .black, radius: 2, x: 0, y: 1)
                             .shadow(color: .black.opacity(0.8), radius: 6)
                             .padding(.horizontal, 28)

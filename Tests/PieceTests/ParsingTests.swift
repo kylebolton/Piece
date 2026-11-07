@@ -248,6 +248,30 @@ final class SubtitleTests: XCTestCase {
         XCTAssertEqual(SubtitleLanguage["pt-br"]?.nativeName, "Português (Brasil)")
     }
 
+    func testSubtitleStyle() {
+        XCTAssertEqual(SubtitleStyle.hex(of: SubtitleStyle.color(hex: "#7FD4FF")!), "#7FD4FF")
+        XCTAssertEqual(SubtitleStyle.hex(of: SubtitleStyle.color(hex: "ff0000")!), "#FF0000")
+        XCTAssertNil(SubtitleStyle.color(hex: "#12345"))
+
+        // The system font at each weight, upright and italic.
+        let bold = SubtitleStyle(fontFace: "bold-italic").nsFont(size: 20)
+        XCTAssertTrue(bold.fontDescriptor.symbolicTraits.contains(.italic))
+        XCTAssertTrue(bold.fontDescriptor.symbolicTraits.contains(.bold))
+        XCTAssertEqual(SubtitleStyle().fontDescription, "System Semibold")
+
+        // Switching family keeps the nearest face.
+        let boldItalic = SubtitleTypeface.Face(id: "bold-italic", name: "Bold Italic", weight: 9, isItalic: true)
+        let georgia = SubtitleTypeface.closest(to: boldItalic, in: "Georgia")
+        XCTAssertEqual(georgia?.id, "Georgia-BoldItalic")
+        XCTAssertEqual(SubtitleStyle(fontFamily: "Georgia", fontFace: "Georgia-BoldItalic").fontDescription, "Georgia Bold Italic")
+        XCTAssertTrue(SubtitleTypeface.families.contains("Georgia"))
+        XCTAssertFalse(SubtitleTypeface.families.contains("Webdings"))
+
+        // A removed font falls back to the system font.
+        let missing = SubtitleStyle(fontFamily: "No Such Font", fontFace: "NoSuchFont-Bold").nsFont(size: 20)
+        XCTAssertEqual(missing.familyName, NSFont.systemFont(ofSize: 20).familyName)
+    }
+
     func testFinder() {
         let paths = ["Sintel/Sintel.mp4", "Sintel/Sintel.en.srt", "Sintel/Sintel.de.srt", "Sintel/poster.jpg"]
         XCTAssertEqual(SubtitleFinder.matches(forVideo: "Sintel/Sintel.mp4", among: paths), ["Sintel/Sintel.en.srt", "Sintel/Sintel.de.srt"])
