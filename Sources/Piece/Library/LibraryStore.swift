@@ -58,7 +58,8 @@ final class LibraryStore {
     func remove(_ ids: Set<UUID>, moveToTrash: Bool) {
         if moveToTrash {
             for item in items where ids.contains(item.id) {
-                try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
+                // A packed item's only copy is its archive.
+                try? FileManager.default.trashItem(at: item.packURL ?? item.url, resultingItemURL: nil)
             }
         }
         items.removeAll { ids.contains($0.id) }

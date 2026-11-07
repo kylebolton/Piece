@@ -133,6 +133,7 @@ final class CompressionService {
         guard !packed.isEmpty else { completion?(); return }
         for (index, item) in packed.enumerated() {
             enqueue(Job(title: item.title, detail: "Unpacking…")) { [weak self] job in
+                defer { if index == packed.count - 1 { completion?() } }
                 guard let self, let name = item.packedFile else { return }
                 let pack = Self.packsFolder.appendingPathComponent(name)
                 let destination = item.url
@@ -152,7 +153,6 @@ final class CompressionService {
                 } catch {
                     self.lastError = "Couldn't unpack “\(item.title)”: \(error.localizedDescription)"
                 }
-                if index == packed.count - 1 { completion?() }
             }
         }
     }

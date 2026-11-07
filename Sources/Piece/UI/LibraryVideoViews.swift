@@ -111,8 +111,8 @@ struct FilmsView: View {
         TagMenu(targets: [film.id.uuidString])
         StorageMenu(itemIDs: [film.id])
         Divider()
-        Button("Remove from Library", systemImage: "minus.circle") { app.library.remove([film.id], moveToTrash: false) }
-        Button("Move to Trash", systemImage: "trash", role: .destructive) { app.library.remove([film.id], moveToTrash: true) }
+        Button("Remove from Library", systemImage: "minus.circle") { app.removeFromLibrary([film.id], moveToTrash: false) }
+        Button("Move to Trash", systemImage: "trash", role: .destructive) { app.removeFromLibrary([film.id], moveToTrash: true) }
     }
 }
 
@@ -431,7 +431,7 @@ struct TVView: View {
                                     }
                                     Divider()
                                     Button("Remove from Library", systemImage: "minus.circle") {
-                                        app.library.remove(Set(show.episodes.map(\.id)), moveToTrash: false)
+                                        app.removeFromLibrary(Set(show.episodes.map(\.id)), moveToTrash: false)
                                     }
                                 }
                             }
@@ -549,7 +549,7 @@ struct ShowDetailView: View {
                     Button("Move to Films", systemImage: "film") { app.library.changeKind(of: episode.id, to: .film) }
                     Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([episode.url]) }
                     Divider()
-                    Button("Remove from Library", systemImage: "minus.circle") { app.library.remove([episode.id], moveToTrash: false) }
+                    Button("Remove from Library", systemImage: "minus.circle") { app.removeFromLibrary([episode.id], moveToTrash: false) }
                 }
             }
             .listStyle(.inset)

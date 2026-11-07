@@ -301,6 +301,20 @@ final class AppModel {
         NSApp.requestUserAttention(.informationalRequest)
     }
 
+    /// Takes items out of the library. Packed items are unpacked first when their files are meant to stay,
+    /// since the archive would otherwise be left with nothing pointing at it.
+    func removeFromLibrary(_ ids: Set<UUID>, moveToTrash: Bool) {
+        let packed = library.items.filter { ids.contains($0.id) && $0.isPacked }
+        guard !moveToTrash, !packed.isEmpty else { return library.remove(ids, moveToTrash: moveToTrash) }
+        library.remove(ids.subtracting(packed.map(\.id)), moveToTrash: false)
+        compression.unpack(packed) { [weak self] in
+            guard let self else { return }
+            // Anything that failed to unpack stays in the library rather than losing its only reference.
+            let restored = Set(packed.map(\.id)).filter { self.library.item($0)?.isPacked == false }
+            self.library.remove(restored, moveToTrash: false)
+        }
+    }
+
     /// Packing deletes the original files, so anything still being shared has to stop first.
     func pack(_ items: [MediaItem]) {
         let hashes = Set(items.compactMap(\.torrentHash))

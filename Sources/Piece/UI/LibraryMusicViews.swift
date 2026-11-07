@@ -100,8 +100,8 @@ private struct SongsTable: View {
             }
             Button("Refresh Info", systemImage: "arrow.clockwise") { app.library.refreshMetadata(for: Array(ids)) }
             Divider()
-            Button("Remove from Library", systemImage: "minus.circle") { app.library.remove(ids, moveToTrash: false) }
-            Button("Move to Trash", systemImage: "trash", role: .destructive) { app.library.remove(ids, moveToTrash: true) }
+            Button("Remove from Library", systemImage: "minus.circle") { app.removeFromLibrary(ids, moveToTrash: false) }
+            Button("Move to Trash", systemImage: "trash", role: .destructive) { app.removeFromLibrary(ids, moveToTrash: true) }
         } primaryAction: { ids in
             play(ids, in: tracks)
         }
@@ -242,7 +242,7 @@ struct OtherLibraryView: View {
                     TagMenu(targets: ids.map(\.uuidString))
                     StorageMenu(itemIDs: Array(ids))
                     Divider()
-                    Button("Remove from Library", systemImage: "minus.circle") { app.library.remove(ids, moveToTrash: false) }
+                    Button("Remove from Library", systemImage: "minus.circle") { app.removeFromLibrary(ids, moveToTrash: false) }
                 } primaryAction: { ids in
                     reveal(ids, in: items)
                 }
