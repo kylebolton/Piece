@@ -598,7 +598,7 @@ final class PlayerModel {
         let sidecars = tracks.filter { if case .embedded = $0.source { false } else { true } }
         if sidecars.count == 1, sidecars[0].language == nil {
             await select(subtitle: sidecars[0])
-        } else if !settings.openSubtitlesKey.isEmpty {
+        } else if OpenSubtitles.hasKey {
             await searchOnline(autoSelect: true)
         }
     }

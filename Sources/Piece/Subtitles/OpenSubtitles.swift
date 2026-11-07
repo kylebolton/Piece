@@ -69,9 +69,16 @@ final class OpenSubtitles {
         }.joined(separator: "&")
     }
 
-    private func request(_ path: String, query: [String: String] = [:], body: [String: Any]? = nil) throws -> URLRequest {
+    /// The user's own API key, or the one built into the app.
+    static var apiKey: String {
         let own = AppSettings.shared.openSubtitlesKey.trimmingCharacters(in: .whitespaces)
-        let key = own.isEmpty ? BuiltInKeys.openSubtitles : own
+        return own.isEmpty ? BuiltInKeys.openSubtitles : own
+    }
+
+    static var hasKey: Bool { !apiKey.isEmpty }
+
+    private func request(_ path: String, query: [String: String] = [:], body: [String: Any]? = nil) throws -> URLRequest {
+        let key = Self.apiKey
         guard !key.isEmpty else { throw OpenSubtitlesError.missingKey }
         var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty {
