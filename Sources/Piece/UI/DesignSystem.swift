@@ -296,4 +296,14 @@ extension View {
             if prominent { buttonStyle(.borderedProminent) } else { buttonStyle(.bordered) }
         }
     }
+    
+    /// Allow to hide or not the View with a Bool
+    @ViewBuilder
+    func isHidden(_ hidden: Bool) -> some View {
+        if hidden {
+            self.hidden()
+        } else {
+            self
+        }
+    }
 }

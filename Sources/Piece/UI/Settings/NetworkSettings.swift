@@ -112,9 +112,10 @@ private struct SpeedLimitRow: View {
             }
             .toggleStyle(.checkbox)
             Spacer()
-            HStack(spacing: 4) {
-                TextField("Speed", value: fieldBinding,
-                          format: .number.precision(.fractionLength(0...3)).grouping(.never))
+            ZStack {
+                HStack(spacing: 4) {
+                    TextField("Speed", value: fieldBinding,
+                              format: .number.precision(.fractionLength(0...3)).grouping(.never))
                     .labelsHidden()
                     .textFieldStyle(.roundedBorder)
                     .multilineTextAlignment(.trailing)
@@ -122,14 +123,19 @@ private struct SpeedLimitRow: View {
                     .frame(width: 72)
                     .focused($fieldFocused)
                     .id(fieldRevision)
-                Picker("Unit", selection: $unit) {
-                    ForEach(SpeedUnit.allCases) { Text($0.label).tag($0) }
+                    Picker("Unit", selection: $unit) {
+                        ForEach(SpeedUnit.allCases) { Text($0.label).tag($0) }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .fixedSize()
+                .isHidden(!isLimited)
+                
+                Text("Unlimited")
+                    .foregroundStyle(.secondary)
+                    .isHidden(isLimited)
             }
-            .disabled(!isLimited)
         }
         .onChange(of: limitKB) {
             guard isLimited else { return }
