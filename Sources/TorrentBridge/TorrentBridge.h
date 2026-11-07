@@ -25,6 +25,8 @@ NS_SWIFT_SENDABLE
 @property (nonatomic) KTTorrentState state;
 @property (nonatomic) BOOL paused;
 @property (nonatomic) BOOL autoManaged;
+/// Paused by the transfer hold (see `setHoldActive:exempt:`), not by the user.
+@property (nonatomic) BOOL held;
 @property (nonatomic) BOOL hasMetadata;
 @property (nonatomic) BOOL sequential;
 @property (nonatomic) float progress;
@@ -128,6 +130,12 @@ NS_SWIFT_SENDABLE
 - (void)recheck:(NSString *)infoHash;
 - (void)reannounceTorrent:(NSString *)infoHash;
 - (void)setSequential:(BOOL)sequential forTorrent:(NSString *)infoHash;
+
+/// While active, every transfer the user hasn't paused and that isn't in `exempt` is paused and marked
+/// `held`; torrents added or restored meanwhile start held. Lifting it (or exempting a torrent) resumes
+/// exactly the ones it paused. Saved resume data never records a hold, so a quit or crash while held
+/// brings transfers back as the user left them. Pausing or resuming a held torrent ends its hold.
+- (void)setHoldActive:(BOOL)active exempt:(NSArray<NSString *> *)exempt;
 
 - (NSArray<KTTorrentStatus *> *)statuses;
 - (NSArray<KTFileEntry *> *)filesForTorrent:(NSString *)infoHash;

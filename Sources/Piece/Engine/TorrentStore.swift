@@ -15,6 +15,8 @@ final class TorrentStore {
     var onFinished: ((Torrent) -> Void)?
 
     @ObservationIgnored let session: KTSession
+    /// Holds transfers on battery power or a metered connection, when the user asked for it.
+    let policy: TransferPolicy
     @ObservationIgnored private let queue = DispatchQueue(label: "Piece.engine", qos: .userInitiated)
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var tick = 0
@@ -24,6 +26,7 @@ final class TorrentStore {
     init(settings: AppSettings) {
         let state = AppPaths.directory("State").path
         session = KTSession(stateDirectory: state, settings: settings.sessionSettings)
+        policy = TransferPolicy(settings: settings)
         // Restored transfers keep whatever trackers they were saved with; the rules were applied
         // when they were added, or when the rules last changed.
         session.setMergeTrackers(settings.trackers(.merge), filterTrackers: settings.trackers(.filter), applyToExisting: false)
@@ -32,6 +35,9 @@ final class TorrentStore {
     func start() {
         if DemoTorrents.isEnabled { loadDemo(); return }
         let session = session
+        policy.onChange = { [weak self] active, exempt in self?.applyHold(active, exempt: exempt) }
+        // Decides the hold before anything is restored, so held transfers never start at launch.
+        policy.start()
         queue.async { [weak self] in
             session.restoreTorrents()
             Task { @MainActor in self?.refresh() }
@@ -67,6 +73,14 @@ final class TorrentStore {
 
     func torrent(_ id: String) -> Torrent? { byID[id] }
 
+    private func applyHold(_ active: Bool, exempt: Set<String>) {
+        guard !isShutDown else { return }
+        let session = session
+        let hashes = Array(exempt)
+        queue.async { session.setHoldActive(active, exempt: hashes) }
+        refresh()
+    }
+
     // MARK: - Polling
 
     private func refresh() {
@@ -98,6 +112,7 @@ final class TorrentStore {
                 added = true
             }
             torrent.apply(status)
+            if status.held, torrent.heldStatus != policy.heldStatus { torrent.heldStatus = policy.heldStatus }
             down += Int(status.downloadRate)
             up += Int(status.uploadRate)
         }
@@ -195,17 +210,22 @@ final class TorrentStore {
     // MARK: - Control
 
     func pause(_ torrent: Torrent) {
+        policy.forget(torrent.id)
         session.pauseTorrent(torrent.id)
         refresh()
     }
 
+    /// While transfers are held, resuming one lets it run anyway until the conditions change.
     func resume(_ torrent: Torrent) {
-        session.resumeTorrent(torrent.id)
+        if policy.isHolding { policy.resumeAnyway(torrent.id) }
+        let session = session, id = torrent.id
+        // After the hold update queued above, so the hold doesn't pause it again.
+        queue.async { session.resumeTorrent(id) }
         refresh()
     }
 
     func toggle(_ torrent: Torrent) {
-        if torrent.phase == .paused || (torrent.phase == .completed) || torrent.phase == .error {
+        if torrent.canResume {
             resume(torrent)
         } else {
             pause(torrent)
@@ -221,8 +241,19 @@ final class TorrentStore {
     func recheck(_ torrent: Torrent) { session.recheck(torrent.id) }
     func reannounce(_ torrent: Torrent) { session.reannounceTorrent(torrent.id) }
 
-    func pauseAll() { torrents.forEach { session.pauseTorrent($0.id) }; refresh() }
-    func resumeAll() { torrents.forEach { session.resumeTorrent($0.id) }; refresh() }
+    func pauseAll() {
+        policy.endOverride()
+        torrents.forEach { session.pauseTorrent($0.id) }
+        refresh()
+    }
+
+    /// While transfers are held this is "Resume Anyway" for everything.
+    func resumeAll() {
+        if policy.isHolding { policy.overrideHold() }
+        let session = session, ids = torrents.map(\.id)
+        queue.async { ids.forEach(session.resumeTorrent) }
+        refresh()
+    }
 
     // MARK: - Details
 

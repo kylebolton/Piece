@@ -32,6 +32,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -289,6 +290,12 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     // "Finished" events held back until the torrent's files have their final names.
     NSMutableDictionary<NSString *, KTEvent *> *_deferredFinished;
     NSMutableDictionary<NSString *, NSDate *> *_deferredSince;
+    // The transfer hold: whether it's on, the torrents it must leave alone, and the ones it paused
+    // (mapped to whether each was auto-managed before).
+    std::mutex _holdMutex;
+    bool _holdActive;
+    std::set<std::string> _holdExempt;
+    std::map<std::string, bool> _held;
 }
 
 - (instancetype)initWithStateDirectory:(NSString *)stateDirectory settings:(KTSessionSettings *)settings {
@@ -404,6 +411,7 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             lt::error_code ec;
             lt::add_torrent_params atp = lt::read_resume_data(buf, ec);
             if (ec) continue;
+            [self holdIfNeeded:atp hash:hashString(atp.info_hashes)];
             lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);
             if (ec || !h.is_valid()) continue;
             std::lock_guard<std::mutex> lock(_mutex);
@@ -458,8 +466,12 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             return toNS(hash);
         }
         lt::error_code ec;
+        [self holdIfNeeded:atp hash:hash];
+        std::string requested = hash;
         lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);
         if (ec || !h.is_valid()) {
+            std::lock_guard<std::mutex> lock(_holdMutex);
+            _held.erase(requested);
             if (error) *error = makeError(ec ? ec.message() : "The torrent could not be added.");
             return nil;
         }
@@ -521,6 +533,7 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             std::lock_guard<std::mutex> lock(_mutex);
             _handles.erase(hash);
         }
+        [self endHoldFor:infoHash];
         {
             std::lock_guard<std::mutex> lock(_renameMutex);
             for (auto it = _renaming.begin(); it != _renaming.end();)
@@ -537,6 +550,7 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     try {
         lt::torrent_handle h;
         if (![self handle:h forHash:infoHash]) return;
+        [self endHoldFor:infoHash];
         h.unset_flags(lt::torrent_flags::auto_managed);
         h.pause(lt::torrent_handle::graceful_pause);
     } catch (const std::exception &) {
@@ -548,11 +562,70 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     try {
         lt::torrent_handle h;
         if (![self handle:h forHash:infoHash]) return;
+        [self endHoldFor:infoHash];
         h.clear_error();
         h.set_flags(lt::torrent_flags::auto_managed);
         h.resume();
     } catch (const std::exception &) {
     }
+}
+
+// MARK: - Hold
+
+- (void)setHoldActive:(BOOL)active exempt:(NSArray<NSString *> *)exempt {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        std::set<std::string> keep;
+        for (NSString *hash in exempt) keep.insert(hash.UTF8String);
+        std::vector<std::pair<std::string, lt::torrent_handle>> handles;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            handles.assign(_handles.begin(), _handles.end());
+        }
+        std::lock_guard<std::mutex> lock(_holdMutex);
+        _holdActive = active;
+        _holdExempt = std::move(keep);
+        for (auto &entry : handles) {
+            try {
+                lt::torrent_handle &h = entry.second;
+                if (!h.is_valid()) continue;
+                const std::string &hash = entry.first;
+                bool hold = _holdActive && !_holdExempt.count(hash);
+                auto held = _held.find(hash);
+                if (hold && held == _held.end()) {
+                    lt::torrent_flags_t flags = h.flags();
+                    bool userPaused = (flags & lt::torrent_flags::paused) && !(flags & lt::torrent_flags::auto_managed);
+                    if (userPaused) continue;
+                    _held[hash] = bool(flags & lt::torrent_flags::auto_managed);
+                    h.unset_flags(lt::torrent_flags::auto_managed);
+                    h.pause();
+                } else if (!hold && held != _held.end()) {
+                    bool wasAutoManaged = held->second;
+                    _held.erase(held);
+                    if (wasAutoManaged) h.set_flags(lt::torrent_flags::auto_managed);
+                    h.resume();
+                }
+            } catch (const std::exception &) {
+            }
+        }
+    } catch (const std::exception &) {
+    }
+}
+
+/// Makes a torrent about to be added or restored start held, when the hold applies to it.
+- (void)holdIfNeeded:(lt::add_torrent_params &)atp hash:(const std::string &)hash {
+    std::lock_guard<std::mutex> lock(_holdMutex);
+    if (!_holdActive || _holdExempt.count(hash)) return;
+    bool userPaused = (atp.flags & lt::torrent_flags::paused) && !(atp.flags & lt::torrent_flags::auto_managed);
+    if (userPaused) return;
+    _held[hash] = bool(atp.flags & lt::torrent_flags::auto_managed);
+    atp.flags &= ~lt::torrent_flags::auto_managed;
+    atp.flags |= lt::torrent_flags::paused;
+}
+
+- (void)endHoldFor:(NSString *)infoHash {
+    std::lock_guard<std::mutex> lock(_holdMutex);
+    _held.erase(infoHash.UTF8String);
 }
 
 - (void)recheck:(NSString *)infoHash {
@@ -594,6 +667,11 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             std::lock_guard<std::mutex> lock(_mutex);
             handles.assign(_handles.begin(), _handles.end());
         }
+        std::set<std::string> held;
+        {
+            std::lock_guard<std::mutex> lock(_holdMutex);
+            for (auto &entry : _held) held.insert(entry.first);
+        }
         NSMutableArray<KTTorrentStatus *> *out = [NSMutableArray arrayWithCapacity:handles.size()];
         for (auto &entry : handles) {
             if (!entry.second.is_valid()) continue;
@@ -620,6 +698,7 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             }
             s.paused = bool(st.flags & lt::torrent_flags::paused);
             s.autoManaged = bool(st.flags & lt::torrent_flags::auto_managed);
+            s.held = held.count(entry.first) > 0;
             s.sequential = bool(st.flags & lt::torrent_flags::sequential_download);
             s.hasMetadata = st.has_metadata;
             s.progress = st.progress;
@@ -1059,7 +1138,23 @@ lt::settings_pack makePack(KTSessionSettings *s) {
                     known = _handles.count(hash) > 0;
                 }
                 // A torrent removed while its save was in flight must not come back at next launch.
-                if (known) writeFile([self resumePathFor:hash], lt::write_resume_data_buf(rd->params));
+                if (known) {
+                    // Save the transfer as the user left it, not as the hold has it.
+                    std::optional<bool> heldAutoManaged;
+                    {
+                        std::lock_guard<std::mutex> lock(_holdMutex);
+                        auto held = _held.find(hash);
+                        if (held != _held.end()) heldAutoManaged = held->second;
+                    }
+                    if (heldAutoManaged) {
+                        lt::add_torrent_params params = rd->params;
+                        params.flags &= ~lt::torrent_flags::paused;
+                        if (*heldAutoManaged) params.flags |= lt::torrent_flags::auto_managed;
+                        writeFile([self resumePathFor:hash], lt::write_resume_data_buf(params));
+                    } else {
+                        writeFile([self resumePathFor:hash], lt::write_resume_data_buf(rd->params));
+                    }
+                }
             } else if (lt::alert_cast<lt::save_resume_data_failed_alert>(a)) {
                 --_pendingResume;
             } else if (auto *fin = lt::alert_cast<lt::torrent_finished_alert>(a)) {

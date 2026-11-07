@@ -40,6 +40,16 @@ struct NetworkSettings: View {
                 )
                 .monospacedDigit()
             }
+            Section {
+                if app.torrents.policy.hasBattery {
+                    Toggle("Pause transfers on battery power", isOn: $settings.pauseOnBattery)
+                }
+                Toggle("Pause transfers on metered connections", isOn: $settings.pauseOnMetered)
+            } header: {
+                Text("Pause automatically")
+            } footer: {
+                Text("Metered connections are Personal Hotspot, cellular and networks set to Low Data Mode. Transfers resume on their own when this no longer applies; a video you're playing keeps downloading.")
+            }
             Section("Connection") {
                 LabeledContent("Incoming port") {
                     TextField("Port", value: $settings.listenPort, format: .number.grouping(.never))

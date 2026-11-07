@@ -24,6 +24,7 @@ struct MenuBarPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            TransferHoldBanner(policy: app.torrents.policy, compact: true)
             searchField
             if parsed.isEmpty { activeTransfers } else { results }
             Divider()
@@ -210,10 +211,10 @@ private struct TransferLine: View {
             }
             Spacer(minLength: 0)
             Button { app.torrents.toggle(torrent) } label: {
-                Image(systemName: torrent.phase == .paused ? "play.circle" : "pause.circle")
+                Image(systemName: torrent.isPaused ? "play.circle" : "pause.circle")
             }
             .buttonStyle(.borderless)
-            .help(torrent.phase == .paused ? "Resume" : "Pause")
+            .help(torrent.phase == .held ? "Resume anyway" : torrent.isPaused ? "Resume" : "Pause")
         }
         .font(.callout)
     }

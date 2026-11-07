@@ -354,7 +354,7 @@ extension AppModel {
         return WidgetSnapshot(
             downloadRate: torrents.downloadRate, uploadRate: torrents.uploadRate, activeCount: active.count,
             transfers: active.prefix(4).map {
-                .init(id: $0.id, name: $0.name, progress: $0.progress, status: $0.statusLine, isPaused: $0.phase == .paused)
+                .init(id: $0.id, name: $0.name, progress: $0.progress, status: $0.statusLine, isPaused: $0.isPaused)
             },
             recents: library.items.filter { $0.kind != .track }.sorted { $0.dateAdded > $1.dateAdded }.prefix(4).map {
                 .init(id: $0.id.uuidString, title: $0.kind == .episode ? ($0.showTitle ?? $0.title) : $0.title,

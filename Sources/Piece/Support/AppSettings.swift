@@ -18,6 +18,10 @@ final class AppSettings {
     var enableDHT: Bool { didSet { defaults.set(enableDHT, forKey: "enableDHT") } }
     var enablePortMapping: Bool { didSet { defaults.set(enablePortMapping, forKey: "enablePortMapping") } }
     var requireEncryption: Bool { didSet { defaults.set(requireEncryption, forKey: "requireEncryption") } }
+    /// Hold every transfer while the Mac runs on battery power. See `TransferPolicy`.
+    var pauseOnBattery: Bool { didSet { defaults.set(pauseOnBattery, forKey: "pauseOnBattery") } }
+    /// Hold every transfer on a metered connection (Personal Hotspot, cellular, Low Data Mode).
+    var pauseOnMetered: Bool { didSet { defaults.set(pauseOnMetered, forKey: "pauseOnMetered") } }
 
     var addToLibraryAutomatically: Bool { didSet { defaults.set(addToLibraryAutomatically, forKey: "addToLibrary") } }
     var notifyOnCompletion: Bool { didSet { defaults.set(notifyOnCompletion, forKey: "notifyOnCompletion") } }
@@ -115,6 +119,8 @@ final class AppSettings {
         enableDHT = defaults.bool(forKey: "enableDHT")
         enablePortMapping = defaults.bool(forKey: "enablePortMapping")
         requireEncryption = defaults.bool(forKey: "requireEncryption")
+        pauseOnBattery = defaults.bool(forKey: "pauseOnBattery")
+        pauseOnMetered = defaults.bool(forKey: "pauseOnMetered")
         addToLibraryAutomatically = defaults.bool(forKey: "addToLibrary")
         notifyOnCompletion = defaults.bool(forKey: "notifyOnCompletion")
         showMenuBarItem = defaults.bool(forKey: "showMenuBarItem")

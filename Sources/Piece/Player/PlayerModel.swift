@@ -136,7 +136,8 @@ final class PlayerModel {
     // MARK: - Starting and stopping
 
     func play(_ newItem: PlaybackItem) {
-        stop()
+        // Not `stop()`: the transfer hold would close in on the old torrent only to let it go again.
+        tearDown()
         var newItem = newItem
         if newItem.libraryID == nil {
             newItem.libraryID = library.items.first { $0.path == newItem.absolutePath }?.id
@@ -149,6 +150,11 @@ final class PlayerModel {
         status = .preparing("Preparing…")
         showResumeToast(newItem.startPosition > 1 ? newItem.startPosition : nil)
 
+        if case .torrent(let hash, _, _, _, _) = newItem.origin {
+            torrents.policy.playingHash = hash
+        } else {
+            torrents.policy.playingHash = nil
+        }
         if case .torrent(let hash, let index, _, _, let size) = newItem.origin {
             if let torrent = torrents.torrent(hash), torrent.phase == .paused { torrents.resume(torrent) }
             // Containers keep their index at the start or the end; fetch both before anything else.
@@ -166,6 +172,11 @@ final class PlayerModel {
     }
 
     func stop() {
+        tearDown()
+        torrents.policy.playingHash = nil
+    }
+
+    private func tearDown() {
         savePosition(force: true)
         generation += 1
         statusTask?.cancel()

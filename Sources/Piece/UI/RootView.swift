@@ -88,7 +88,7 @@ struct RootView: View {
                 Button {
                     selected.forEach { app.torrents.toggle($0) }
                 } label: {
-                    let allPaused = !selected.isEmpty && selected.allSatisfy { $0.phase == .paused || $0.phase == .completed }
+                    let allPaused = !selected.isEmpty && selected.allSatisfy { $0.phase == .paused || $0.phase == .held || $0.phase == .completed }
                     Label(allPaused ? "Resume" : "Pause", systemImage: allPaused ? "play.fill" : "pause.fill")
                 }
                 .disabled(selected.isEmpty)

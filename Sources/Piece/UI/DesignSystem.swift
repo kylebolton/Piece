@@ -7,7 +7,7 @@ extension TorrentPhase {
         switch self {
         case .downloading, .fetchingMetadata: .accentColor
         case .seeding, .completed: .green
-        case .checking: .orange
+        case .checking, .held: .orange
         case .paused, .queued: .secondary
         case .error: .red
         }

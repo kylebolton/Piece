@@ -258,4 +258,87 @@ final class IntegrationTests: XCTestCase {
         session.restoreTorrents()
         XCTAssertEqual(session.statuses().map(\.infoHash), [hash])
     }
+
+    private func status(_ hash: String) -> KTTorrentStatus? { session.statuses().first { $0.infoHash == hash } }
+
+    private func waitFor(_ what: String, _ condition: () -> Bool) {
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            if condition() { return }
+            _ = session.pollEvents()
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        XCTFail("Timed out waiting for \(what)")
+    }
+
+    private func restart(holding: Bool) {
+        session.shutdown()
+        let settings = KTSessionSettings()
+        settings.listenPort = 0
+        settings.enableDHT = false
+        session = KTSession(stateDirectory: folder.appendingPathComponent("state").path, settings: settings)
+        session.setHoldActive(holding, exempt: [])
+        session.restoreTorrents()
+    }
+
+    func testHoldPausesOnlyRunningTransfersAndLeavesNoTrace() throws {
+        let runningFile = folder.appendingPathComponent("data/running.bin")
+        let pausedFile = folder.appendingPathComponent("data/paused.bin")
+        try Data(repeating: 1, count: 200_000).write(to: runningFile)
+        try Data(repeating: 2, count: 200_000).write(to: pausedFile)
+        let running = try seed(runningFile)
+        let paused = try seed(pausedFile)
+        session.pauseTorrent(paused)
+        waitFor("user pause") { status(paused)?.paused == true }
+
+        session.setHoldActive(true, exempt: [])
+        waitFor("hold") { status(running).map { $0.held && $0.paused } == true }
+        XCTAssertEqual(status(paused)?.held, false, "a transfer the user paused isn't the hold's")
+
+        // The playing (or resumed-anyway) transfer runs while the rest stay held.
+        session.setHoldActive(true, exempt: [running])
+        waitFor("exemption") { status(running).map { !$0.held && !$0.paused } == true }
+        session.setHoldActive(true, exempt: [])
+        waitFor("hold again") { status(running)?.held == true }
+
+        // Quitting while held brings transfers back as the user left them.
+        restart(holding: false)
+        waitFor("restore") { status(running) != nil && status(paused) != nil }
+        XCTAssertEqual(status(running)?.held, false)
+        XCTAssertEqual(status(running)?.autoManaged, true)
+        XCTAssertEqual(status(paused)?.paused, true)
+        XCTAssertEqual(status(paused)?.autoManaged, false)
+
+        // Launching while the hold applies never starts a held transfer.
+        restart(holding: true)
+        waitFor("restore held") { status(running)?.held == true }
+        XCTAssertEqual(status(running)?.paused, true)
+        XCTAssertEqual(status(paused)?.held, false)
+
+        // Pausing a held transfer makes it the user's; lifting the hold leaves it paused.
+        session.pauseTorrent(running)
+        session.setHoldActive(false, exempt: [])
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(status(running)?.held, false)
+        XCTAssertEqual(status(running)?.paused, true)
+
+        // Lifting the hold resumes what it paused.
+        session.resumeTorrent(running)
+        session.setHoldActive(true, exempt: [])
+        waitFor("hold before lift") { status(running)?.held == true }
+        session.setHoldActive(false, exempt: [])
+        waitFor("release") { status(running).map { !$0.held && !$0.paused } == true }
+        XCTAssertEqual(status(paused)?.paused, true)
+    }
+
+    func testTorrentsAddedDuringHoldStartHeld() throws {
+        let file = folder.appendingPathComponent("data/late.bin")
+        try Data(repeating: 3, count: 200_000).write(to: file)
+        session.setHoldActive(true, exempt: [])
+        let torrent = try XCTUnwrap(KTSession.createTorrent(forPath: file.path))
+        let hash = try session.addTorrentData(torrent, savePath: file.deletingLastPathComponent().path)
+        waitFor("held at add") { status(hash).map { $0.held && $0.paused } == true }
+        session.setHoldActive(false, exempt: [])
+        waitFor("seeding after release") { status(hash).map { !$0.held && $0.state == .seeding } == true }
+    }
 }
