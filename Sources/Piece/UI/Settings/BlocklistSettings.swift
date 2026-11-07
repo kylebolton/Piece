@@ -15,50 +15,53 @@ struct BlocklistSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section {
-                TextField("Address", text: $settings.blocklistURL, prompt: Text("https://example.org/blocklist.gz"))
-                    .textFieldStyle(.roundedBorder)
-                    .labelsHidden()
-                    .disabled(blocklist.isWorking)
-                    .onSubmit { Task { await blocklist.update() } }
-                HStack {
-                    Button("Update Now") { Task { await blocklist.update() } }
-                        .disabled(blocklist.isWorking || settings.blocklistURL.trimmingCharacters(in: .whitespaces).isEmpty)
-                    Button("Import File…", action: importFile)
+            if settings.blocklistEnabled {
+                Section {
+                    TextField("Address", text: $settings.blocklistURL, prompt: Text("https://example.org/blocklist.gz"))
+                        .textFieldStyle(.roundedBorder)
+                        .labelsHidden()
                         .disabled(blocklist.isWorking)
-                    if blocklist.isWorking { ProgressView().controlSize(.small) }
-                }
-                if let message = blocklist.message {
-                    Text(message)
+                        .onSubmit { Task { await blocklist.update() } }
+                    HStack {
+                        Button("Update Now") { Task { await blocklist.update() } }
+                            .disabled(blocklist.isWorking || settings.blocklistURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                        Button("Import File…", action: importFile)
+                            .disabled(blocklist.isWorking)
+                        if blocklist.isWorking { ProgressView().controlSize(.small) }
+                    }
+                    if let message = blocklist.message {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(blocklist.messageIsError ? Color.red : Color.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Toggle("Update every week automatically", isOn: $settings.blocklistAutoUpdate)
+                        .disabled(settings.blocklistSource.isEmpty && settings.blocklistUpdated == nil && !settings.blocklistEnabled)
+                } header: {
+                    Text("List")
+                } footer: {
+                    Text("Plain text and gzip, xz, bzip2 or zip packed lists work, in PeerGuardian (.p2p), eMule (.dat) or one-range-per-line form.")
                         .font(.caption)
-                        .foregroundStyle(blocklist.messageIsError ? Color.red : Color.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(.secondary)
                 }
-                Toggle("Update every week automatically", isOn: $settings.blocklistAutoUpdate)
-                    .disabled(settings.blocklistSource.isEmpty && settings.blocklistUpdated == nil && !settings.blocklistEnabled)
-            } header: {
-                Text("List")
-            } footer: {
-                Text("Plain text and gzip, xz, bzip2 or zip packed lists work, in PeerGuardian (.p2p), eMule (.dat) or one-range-per-line form.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if let updated = settings.blocklistUpdated {
-                Section("Installed") {
-                    LabeledContent("Address ranges") {
-                        Text(settings.blocklistRuleCount.formatted()).monospacedDigit()
+                
+                if let updated = settings.blocklistUpdated {
+                    Section("Installed") {
+                        LabeledContent("Address ranges") {
+                            Text(settings.blocklistRuleCount.formatted()).monospacedDigit()
+                        }
+                        LabeledContent("Source") {
+                            Text(settings.blocklistSource)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(settings.blocklistSource)
+                        }
+                        LabeledContent("Updated") {
+                            Text(updated.formatted(date: .abbreviated, time: .shortened))
+                        }
+                        Button("Remove Blocklist", role: .destructive) { blocklist.remove() }
+                            .disabled(blocklist.isWorking)
                     }
-                    LabeledContent("Source") {
-                        Text(settings.blocklistSource)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .help(settings.blocklistSource)
-                    }
-                    LabeledContent("Updated") {
-                        Text(updated.formatted(date: .abbreviated, time: .shortened))
-                    }
-                    Button("Remove Blocklist", role: .destructive) { blocklist.remove() }
-                        .disabled(blocklist.isWorking)
                 }
             }
         }
