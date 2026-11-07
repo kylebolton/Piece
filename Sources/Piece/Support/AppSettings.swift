@@ -207,7 +207,7 @@ final class AppSettings {
 }
 
 enum Keychain {
-    private static let service = "me.kylebolton.piece"
+    private static let service = Bundle.main.bundleIdentifier ?? "me.kylebolton.piece"
 
     static func get(_ key: String) -> String {
         let query: [String: Any] = [
