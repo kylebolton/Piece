@@ -152,11 +152,9 @@ final class LibraryStore {
         let folder = ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent
         switch FileKind(path: path) {
         case .video:
-            let lower = filename.lowercased()
-            let isExtra = lower.contains("sample") || lower.contains("trailer") || folder.lowercased() == "sample"
-            if isExtra, size < 200 * 1024 * 1024 { return nil }
-
             let fromFile = ReleaseNameParser.parse(filename)
+            if Self.isExtra(filename: filename, title: fromFile.title, folder: folder), size < 200 * 1024 * 1024 { return nil }
+
             let fromFolder = ReleaseNameParser.parse(folder)
             let folderLooksLikeRelease = fromFolder.year != nil || fromFolder.resolution != nil || fromFolder.isEpisode
             // "Show/Season 1/01 - Pilot.mkv": the folder is only the season, and the one above it names the show.
@@ -211,6 +209,19 @@ final class LibraryStore {
 
         default:
             return nil
+        }
+    }
+
+    /// Samples and trailers: the word appears outside the title ("Film.2010.Trailer.mkv", "Show.S01E01.sample.mkv"),
+    /// is the whole name ("sample.mkv"), or the file sits in a "Sample" folder. "Trailer Park Boys S01E01" is a show.
+    nonisolated static func isExtra(filename: String, title: String, folder: String) -> Bool {
+        if folder.lowercased() == "sample" { return true }
+        func words(_ text: String) -> [String] {
+            text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        }
+        let name = words((filename as NSString).deletingPathExtension), inTitle = words(title)
+        return ["sample", "trailer"].contains { word in
+            name == [word] || name.filter { $0 == word }.count > inTitle.filter { $0 == word }.count
         }
     }
 

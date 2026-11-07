@@ -70,6 +70,9 @@ final class ReleaseNameParserTests: XCTestCase {
         XCTAssertEqual(track?.album, "Album Name")
 
         XCTAssertNil(LibraryStore.classify(path: "/d/Movie/sample.mkv", size: 20_000_000))
+        XCTAssertNil(LibraryStore.classify(path: "/d/Movie/Film.2010.Trailer.mkv", size: 20_000_000))
+        XCTAssertNil(LibraryStore.classify(path: "/d/Show/Show.S01E01.sample.mkv", size: 20_000_000))
+        XCTAssertEqual(LibraryStore.classify(path: "/d/TPB/Trailer.Park.Boys.S01E01.mkv", size: 150_000_000)?.kind, .episode)
         XCTAssertNil(LibraryStore.classify(path: "/d/Movie/readme.txt", size: 100))
     }
 
