@@ -14,6 +14,7 @@ struct SearchView: View {
     @State private var selection: Set<String> = []
     @State private var added: Set<String> = []
     @State private var resolving: Set<String> = []
+    @State private var showBookmarks = false
     @FocusState private var fieldFocused: Bool
 
     private var store: SearchStore { app.search }
@@ -37,6 +38,23 @@ struct SearchView: View {
                         .focused($fieldFocused)
                         .onSubmit { store.search() }
                     if store.isSearching { ProgressView().controlSize(.small) }
+                    Button {
+                        showBookmarks.toggle()
+                    } label: {
+                        Image(systemName: app.savedSearches.isSaved(store.query) ? "bookmark.fill" : "bookmark")
+                            .foregroundStyle(app.savedSearches.isSaved(store.query) ? Color.accentColor : Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Bookmarked searches")
+                    .accessibilityLabel("Bookmarked searches")
+                    .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
+                        BookmarksPopover(store: app.savedSearches, query: store.query,
+                                         load: { search in
+                                             store.query = search.query
+                                             store.search()
+                                         },
+                                         dismiss: { showBookmarks = false })
+                    }
                     if !store.query.isEmpty {
                         Button {
                             store.query = ""
@@ -312,6 +330,80 @@ private struct SourceChip: View {
         }
         .buttonStyle(.plain)
         .help(failure ?? (provider.isEnabled ? "Included in searches — click to leave out" : "Not searched — click to include"))
+    }
+}
+
+private struct BookmarksPopover: View {
+    var store: SavedSearchStore
+    var query: String
+    var load: (SavedSearch) -> Void
+    var dismiss: () -> Void
+
+    private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Bookmarks").font(.headline)
+
+            if !trimmed.isEmpty {
+                if store.isSaved(trimmed) {
+                    Label("“\(trimmed)” is bookmarked", systemImage: "checkmark.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else {
+                    Button {
+                        store.add(trimmed)
+                    } label: {
+                        Label("Bookmark “\(trimmed)”", systemImage: "plus").lineLimit(1)
+                    }
+                }
+            }
+
+            Divider()
+
+            if store.searches.isEmpty {
+                Text("No bookmarks yet. Type a search and add it here to come back to it later.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView {
+                    VStack(spacing: 2) {
+                        ForEach(store.searches) { search in
+                            HStack(spacing: 6) {
+                                Button {
+                                    load(search)
+                                    dismiss()
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "bookmark.fill").foregroundStyle(.tertiary)
+                                        Text(search.query).lineLimit(1).truncationMode(.tail)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                Button {
+                                    store.remove(search)
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                                .help("Delete bookmark")
+                                .accessibilityLabel("Delete bookmark \(search.query)")
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+                .frame(maxHeight: 220)
+            }
+        }
+        .padding(14)
+        .frame(width: 280)
     }
 }
 

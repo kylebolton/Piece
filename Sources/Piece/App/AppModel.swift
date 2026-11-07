@@ -56,6 +56,7 @@ final class AppModel {
     let tags = TagStore()
     let compression: CompressionService
     let search = SearchStore()
+    let savedSearches = SavedSearchStore()
     let server: StreamServer
     let player: PlayerModel
     let audio: AudioPlayer
