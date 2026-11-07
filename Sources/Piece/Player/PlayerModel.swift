@@ -63,10 +63,22 @@ final class PlayerModel {
     private(set) var subtitleTracks: [SubtitleTrack] = []
     private(set) var selectedSubtitleID: String?
     private(set) var cueText: String?
-    private(set) var subtitleStatus: String?
+    /// The track being fetched or parsed right now; the previous subtitles stay on screen until it's ready.
+    private(set) var loadingSubtitleID: String?
+    /// Why a track couldn't be loaded, by track id.
+    private(set) var subtitleFailures: [String: String] = [:]
     private(set) var onlineResults: [OnlineSubtitle] = []
-    private(set) var isSearchingOnline = false
+    private(set) var onlineSearch: OnlineSearchState = .idle
+    var isSearchingOnline: Bool { onlineSearch == .searching }
     var subtitleDelay: Double = 0
+
+    enum OnlineSearchState: Equatable {
+        case idle
+        case searching
+        /// Finished; `query` is the title that was searched for.
+        case finished(query: String)
+        case failed(String)
+    }
 
     private(set) var audioStreams: [MediaProbe.Stream] = []
     private(set) var selectedAudioStream: Int?
@@ -80,12 +92,17 @@ final class PlayerModel {
     @ObservationIgnored private var probe: MediaProbe?
     @ObservationIgnored private var cues: [SubtitleCue] = []
     @ObservationIgnored private var generation = 0
+    /// Identifies the latest online search, so a slow earlier one can't overwrite its results.
+    @ObservationIgnored private var searchToken = 0
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private var itemObservation: NSKeyValueObservation?
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var statusTask: Task<Void, Never>?
     @ObservationIgnored private var lastSavedPosition: Double = 0
+    /// Where in the film the current stream starts. Converted streams are started at the resume or seek
+    /// position rather than converting everything before it, so the player's own clock runs behind by this much.
+    @ObservationIgnored private var timeOffset: Double = 0
     @ObservationIgnored private var openSerial = 0
     @ObservationIgnored private var activity: NSObjectProtocol?
     @ObservationIgnored private var resumeToastTask: Task<Void, Never>?
@@ -114,15 +131,24 @@ final class PlayerModel {
     }
 
     var selectedSubtitle: SubtitleTrack? { subtitleTracks.first { $0.id == selectedSubtitleID } }
+    /// Position in the film, whichever point the stream started from.
     var currentTime: Double {
         let t = player.currentTime().seconds
-        return t.isFinite ? t : 0
+        return (t.isFinite ? t : 0) + timeOffset
+    }
+
+    /// Length of the film when known, from the stream or from ffprobe.
+    private var mediaDuration: Double {
+        let streamed = player.currentItem?.duration.seconds ?? 0
+        if streamed.isFinite, streamed > 0 { return streamed + timeOffset }
+        return probe?.duration ?? 0
     }
 
     // MARK: - Starting and stopping
 
     func play(_ newItem: PlaybackItem) {
-        stop()
+        // Not `stop()`: the transfer hold would close in on the old torrent only to let it go again.
+        tearDown()
         var newItem = newItem
         if newItem.libraryID == nil {
             newItem.libraryID = library.items.first { $0.path == newItem.absolutePath }?.id
@@ -135,8 +161,17 @@ final class PlayerModel {
         status = .preparing("Preparing…")
         showResumeToast(newItem.startPosition > 1 ? newItem.startPosition : nil)
 
+        if case .torrent(let hash, _, _, _, _) = newItem.origin {
+            torrents.policy.playingHash = hash
+        } else {
+            torrents.policy.playingHash = nil
+        }
         if case .torrent(let hash, let index, _, _, let size) = newItem.origin {
-            if let torrent = torrents.torrent(hash), torrent.phase == .paused { torrents.resume(torrent) }
+            if let torrent = torrents.torrent(hash) {
+                if torrent.phase == .paused { torrents.resume(torrent) }
+                // A queued transfer never gets pieces until its turn comes; playing it can't wait for that.
+                if torrent.phase == .queued { torrents.forceStart(torrent) }
+            }
             // Containers keep their index at the start or the end; fetch both before anything else.
             server.session.prioritizeTorrent(hash, file: Int32(index), offset: 0, window: 12 * 1024 * 1024)
             server.session.prioritizeTorrent(hash, file: Int32(index), offset: max(0, size - 4 * 1024 * 1024), window: 4 * 1024 * 1024)
@@ -152,6 +187,11 @@ final class PlayerModel {
     }
 
     func stop() {
+        tearDown()
+        torrents.policy.playingHash = nil
+    }
+
+    private func tearDown() {
         savePosition(force: true)
         generation += 1
         statusTask?.cancel()
@@ -173,12 +213,16 @@ final class PlayerModel {
         cueText = nil
         subtitleTracks = []
         selectedSubtitleID = nil
-        subtitleStatus = nil
+        loadingSubtitleID = nil
+        subtitleFailures = [:]
         onlineResults = []
+        onlineSearch = .idle
+        searchToken += 1
         audioStreams = []
         selectedAudioStream = nil
         subtitleDelay = 0
         isConverting = false
+        timeOffset = 0
         isBuffering = false
         isPlaying = false
         notice = nil
@@ -191,10 +235,12 @@ final class PlayerModel {
 
     func skip(by seconds: Double) {
         guard item != nil, status == .ready else { return }
-        let duration = player.currentItem?.duration.seconds ?? 0
+        let duration = mediaDuration
         var target = max(0, currentTime + seconds)
         if duration.isFinite, duration > 0 { target = min(target, max(0, duration - 1)) }
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero,
+        // Before the start of a converted stream: convert again from there.
+        if target < timeOffset { return reopen(at: target, forceHLS: true, withSubtitles: mode == .hls(withSubtitles: true)) }
+        player.seek(to: CMTime(seconds: target - timeOffset, preferredTimescale: 600), toleranceBefore: .zero,
                     toleranceAfter: CMTime(seconds: 0.5, preferredTimescale: 600))
     }
 
@@ -217,6 +263,7 @@ final class PlayerModel {
 
     func startOver() {
         resumedFrom = nil
+        if timeOffset > 0 { return reopen(at: 0, forceHLS: true, withSubtitles: mode == .hls(withSubtitles: true)) }
         player.seek(to: .zero)
     }
 
@@ -279,7 +326,7 @@ final class PlayerModel {
             return server.torrentFileURL(hash: hash, fileIndex: index, name: (relativePath as NSString).lastPathComponent,
                                          loopback: true).absoluteString
         }
-        return item.absolutePath
+        return PartFile.resolve(item.absolutePath)
     }
 
     private func open(at position: Double, forceHLS: Bool, withSubtitles: Bool) async {
@@ -305,12 +352,17 @@ final class PlayerModel {
             guard serial == openSerial else { return }
             let session = HLSSession(server: server)
             let subtitles = wantsSubtitles
-                ? (name: selectedSubtitle?.menuTitle ?? "Subtitles", language: selectedSubtitle?.language, cues: shiftedCues())
+                ? (name: selectedSubtitle?.menuTitle ?? "Subtitles", language: selectedSubtitle?.languageTag, cues: shiftedCues())
                 : nil
-            guard session.start(input: toolInput, probe: probe, audioStream: selectedAudioStream, subtitles: subtitles) else {
+            // Start converting at the position itself, so a resume deep into the film doesn't wait for
+            // everything before it to be converted (or, mid-download, to arrive).
+            let start = position > 1 ? position : 0
+            guard session.start(input: toolInput, probe: probe, audioStream: selectedAudioStream, startTime: start,
+                                subtitles: subtitles) else {
                 status = .failed("The video converter (ffmpeg) isn't available.")
                 return
             }
+            timeOffset = start
             hls = session
             mode = .hls(withSubtitles: wantsSubtitles)
             isConverting = true
@@ -318,11 +370,12 @@ final class PlayerModel {
         } else {
             mode = .direct
             isConverting = false
+            timeOffset = 0
             if case .torrent(let hash, let index, let relativePath, _, _) = item.origin, !isFileComplete {
                 status = .preparing("Waiting for the first pieces…")
                 url = server.torrentFileURL(hash: hash, fileIndex: index, name: (relativePath as NSString).lastPathComponent)
             } else {
-                url = URL(fileURLWithPath: item.absolutePath)
+                url = URL(fileURLWithPath: PartFile.resolve(item.absolutePath))
             }
         }
 
@@ -356,7 +409,7 @@ final class PlayerModel {
         }
         player.replaceCurrentItem(with: playerItem)
         player.play()
-        if position > 1 { await seek(to: position, in: playerItem, generation: generation) }
+        if position > 1, timeOffset == 0 { await seek(to: position, in: playerItem, generation: generation) }
     }
 
     /// Converted streams grow as ffmpeg works, so a resume position may not exist yet.
@@ -376,14 +429,18 @@ final class PlayerModel {
     }
 
     private func reopen(forceHLS: Bool, withSubtitles: Bool) {
-        let position = currentTime
+        reopen(at: currentTime, forceHLS: forceHLS, withSubtitles: withSubtitles)
+    }
+
+    private func reopen(at position: Double, forceHLS: Bool, withSubtitles: Bool) {
         Task { await open(at: position, forceHLS: forceHLS, withSubtitles: withSubtitles) }
     }
 
     // MARK: - Progress
 
-    private func tick(_ time: Double) {
-        guard time.isFinite else { return }
+    private func tick(_ streamTime: Double) {
+        guard streamTime.isFinite else { return }
+        let time = streamTime + timeOffset
         let text = cues.isEmpty ? nil : SubtitleParser.cue(at: time - subtitleDelay, in: cues)?.text
         if text != cueText { cueText = text }
         if abs(time - lastSavedPosition) > 5 { savePosition(force: false) }
@@ -394,7 +451,7 @@ final class PlayerModel {
         let time = currentTime
         guard time > 0 else { return }
         lastSavedPosition = time
-        let duration = player.currentItem?.duration.seconds ?? 0
+        let duration = mediaDuration
         library.update(id) {
             $0.playPosition = time
             $0.lastPlayed = Date()
@@ -460,7 +517,7 @@ final class PlayerModel {
     private func selectLegibleOption(on playerItem: AVPlayerItem) async {
         guard case .hls(withSubtitles: true) = mode,
               let group = try? await playerItem.asset.loadMediaSelectionGroup(for: .legible) else { return }
-        let language = selectedSubtitle?.language
+        let language = selectedSubtitle?.languageTag
         let option = group.options.first { $0.extendedLanguageTag?.hasPrefix(language ?? "\u{0}") == true } ?? group.options.first
         playerItem.select(isExternal ? option : nil, in: group)
     }
@@ -525,7 +582,7 @@ final class PlayerModel {
         for stream in probe?.subtitles ?? [] where MediaProbe.textSubtitleCodecs.contains(stream.codec) {
             tracks.append(SubtitleTrack(
                 id: "embedded:\(stream.index)", name: stream.title ?? "Track \(stream.index)",
-                language: stream.language.flatMap(SubtitleLanguage.code(for:)),
+                language: SubtitleLanguage.identify(tag: stream.language, title: stream.title),
                 detail: stream.title ?? "Embedded", source: .embedded(streamIndex: stream.index)))
         }
         guard generation == self.generation else { return }
@@ -533,16 +590,15 @@ final class PlayerModel {
 
         let settings = AppSettings.shared
         guard settings.autoLoadSubtitles else { return }
-        for language in settings.subtitleLanguages {
-            if let track = tracks.first(where: { $0.language == language }) {
-                await select(subtitle: track)
-                return
-            }
+        // Exact matches for any preferred language beat a track that doesn't say which variant it is.
+        if let track = SubtitleLanguage.best(tracks, for: settings.subtitleLanguages, language: \.language) {
+            await select(subtitle: track)
+            return
         }
         let sidecars = tracks.filter { if case .embedded = $0.source { false } else { true } }
         if sidecars.count == 1, sidecars[0].language == nil {
             await select(subtitle: sidecars[0])
-        } else if !settings.openSubtitlesKey.isEmpty {
+        } else if OpenSubtitles.hasKey {
             await searchOnline(autoSelect: true)
         }
     }
@@ -551,24 +607,29 @@ final class PlayerModel {
         let generation = generation
         guard let track else {
             selectedSubtitleID = nil
+            loadingSubtitleID = nil
             cues = []
             cueText = nil
-            subtitleStatus = nil
             if mode == .hls(withSubtitles: true) { reopen(forceHLS: false, withSubtitles: false) }
             return
         }
-        selectedSubtitleID = track.id
-        subtitleStatus = "Loading subtitles…"
+        loadingSubtitleID = track.id
+        subtitleFailures[track.id] = nil
         do {
             let loaded = try await loadCues(for: track)
-            guard generation == self.generation, selectedSubtitleID == track.id else { return }
+            guard generation == self.generation, loadingSubtitleID == track.id else { return }
+            loadingSubtitleID = nil
+            guard !loaded.isEmpty else {
+                subtitleFailures[track.id] = "That subtitle file is empty."
+                return
+            }
+            selectedSubtitleID = track.id
             cues = loaded
-            subtitleStatus = loaded.isEmpty ? "That subtitle file is empty." : nil
-            if isExternal, !loaded.isEmpty { reopen(forceHLS: true, withSubtitles: true) }
+            if isExternal { reopen(forceHLS: true, withSubtitles: true) }
         } catch {
-            guard generation == self.generation else { return }
-            cues = []
-            subtitleStatus = error.localizedDescription
+            guard generation == self.generation, loadingSubtitleID == track.id else { return }
+            loadingSubtitleID = nil
+            subtitleFailures[track.id] = error.localizedDescription
         }
     }
 
@@ -585,7 +646,7 @@ final class PlayerModel {
                 if session.contiguousBytes(inTorrent: hash, file: Int32(index), offset: 0) >= size { break }
                 try await Task.sleep(for: .milliseconds(500))
             }
-            let data = try Data(contentsOf: URL(fileURLWithPath: absolutePath))
+            let data = try Data(contentsOf: URL(fileURLWithPath: PartFile.resolve(absolutePath)))
             return SubtitleParser.parse(SubtitleParser.decode(data), fileExtension: (absolutePath as NSString).pathExtension)
 
         case .embedded(let streamIndex):
@@ -618,14 +679,16 @@ final class PlayerModel {
                   server.session.contiguousBytes(inTorrent: hash, file: Int32(index), offset: size - chunk) >= chunk
             else { return nil }
         }
-        return OpenSubtitles.hash(fileAt: URL(fileURLWithPath: item.absolutePath))
+        return OpenSubtitles.hash(fileAt: URL(fileURLWithPath: PartFile.resolve(item.absolutePath)))
     }
 
     func searchOnline(autoSelect: Bool = false, query customQuery: String? = nil) async {
         guard let item else { return }
         let generation = generation
-        isSearchingOnline = true
-        defer { isSearchingOnline = false }
+        searchToken += 1
+        let token = searchToken
+        onlineResults = []
+        onlineSearch = .searching
 
         var parsed = ReleaseNameParser.parse((item.absolutePath as NSString).lastPathComponent)
         if let id = item.libraryID, let saved = library.item(id), saved.isMatched {
@@ -634,18 +697,26 @@ final class PlayerModel {
             parsed.episode = saved.episode ?? parsed.episode
             parsed.year = saved.year ?? parsed.year
         }
+        let query = customQuery ?? parsed.title
+        let isFileMatch = customQuery == nil
+        let hash = isFileMatch ? movieHash() : nil
+        let languages = AppSettings.shared.subtitleLanguages
         do {
-            let results = try await OpenSubtitles.shared.search(
-                query: customQuery ?? parsed.title, movieHash: customQuery == nil ? movieHash() : nil,
-                season: customQuery == nil ? parsed.season : nil, episode: customQuery == nil ? parsed.episode : nil,
-                year: customQuery == nil ? parsed.year : nil, languages: AppSettings.shared.subtitleLanguages)
-            guard generation == self.generation else { return }
+            var results = try await OpenSubtitles.shared.search(
+                query: query, movieHash: hash, season: isFileMatch ? parsed.season : nil,
+                episode: isFileMatch ? parsed.episode : nil, year: isFileMatch ? parsed.year : nil, languages: languages)
+            // A wrong year in the file name shouldn't hide every result.
+            if results.isEmpty, isFileMatch, parsed.year != nil, parsed.season == nil {
+                results = try await OpenSubtitles.shared.search(
+                    query: query, movieHash: hash, season: nil, episode: nil, year: nil, languages: languages)
+            }
+            guard generation == self.generation, token == searchToken else { return }
             onlineResults = results
-            if !autoSelect { subtitleStatus = results.isEmpty ? "No subtitles found online." : nil }
+            onlineSearch = .finished(query: query)
             if autoSelect, let best = results.first { await select(online: best) }
         } catch {
-            guard generation == self.generation else { return }
-            if !autoSelect { subtitleStatus = error.localizedDescription }
+            guard generation == self.generation, token == searchToken else { return }
+            onlineSearch = .failed(error.localizedDescription)
         }
     }
 

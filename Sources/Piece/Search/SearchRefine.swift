@@ -27,6 +27,17 @@ enum SizeBand: String, CaseIterable, Identifiable {
 enum Quality: String, CaseIterable, Identifiable {
     case uhd = "4K", fullHD = "1080p", hd = "720p", hdr = "HDR", hevc = "x265"
     var id: String { rawValue }
+
+    /// A release has one resolution, so picking several means "any of these"; the other qualities all have to match.
+    static let resolutions: Set<Quality> = [.uhd, .fullHD, .hd]
+}
+
+extension SearchFilter {
+    func matchesQualities(_ found: Set<Quality>) -> Bool {
+        let wantedResolutions = qualities.intersection(Quality.resolutions)
+        let wantedOthers = qualities.subtracting(Quality.resolutions)
+        return (wantedResolutions.isEmpty || !wantedResolutions.isDisjoint(with: found)) && wantedOthers.isSubset(of: found)
+    }
 }
 
 struct SearchFilter: Equatable {
@@ -79,7 +90,7 @@ enum SearchRefine {
         var kept = results.filter { result in
             (result.seeders ?? 0) >= filter.minSeeds
                 && filter.size.contains(result.size)
-                && (filter.qualities.isEmpty || filter.qualities.isSubset(of: result.qualities))
+                && filter.matchesQualities(result.qualities)
         }
         if filter.hideDuplicates { kept = dedupe(kept) }
         return kept

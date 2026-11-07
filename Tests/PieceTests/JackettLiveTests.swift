@@ -40,6 +40,34 @@ final class JackettLiveTests: XCTestCase {
     }
 }
 
+/// A leftover helper from an earlier run (crash, force quit) is found by its path and stopped; others are left alone.
+final class JackettLeftoverTests: XCTestCase {
+    func testStopsLeftoverByPathOnly() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let binary = folder.appendingPathComponent("jackett")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: binary)
+
+        let leftover = Process()
+        leftover.executableURL = binary
+        leftover.arguments = ["60"]
+        try leftover.run()
+        let bystander = Process()
+        bystander.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        bystander.arguments = ["60"]
+        try bystander.run()
+        defer { leftover.terminate(); bystander.terminate() }
+
+        XCTAssertEqual(JackettManager.runningPIDs(of: binary), [leftover.processIdentifier])
+        await JackettManager.stopLeftovers(of: binary)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertFalse(leftover.isRunning)
+        XCTAssertTrue(bystander.isRunning)
+        XCTAssertEqual(JackettManager.runningPIDs(of: binary), [])
+    }
+}
+
 private extension ProcessInfo {
     /// "arm64" or "x86_64", matching the embedded archive names (the test host runs as this slice).
     var machineHardwareName: String {

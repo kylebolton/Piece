@@ -9,7 +9,14 @@ final class AppSettings {
     private let defaults = UserDefaults.standard
 
     var downloadFolder: String { didSet { defaults.set(downloadFolder, forKey: "downloadFolder") } }
-    var listenPort: Int { didSet { defaults.set(listenPort, forKey: "listenPort") } }
+    /// 1...65535, or 0 to let the system pick one.
+    var listenPort: Int {
+        didSet {
+            // Assigning inside didSet doesn't call it again.
+            listenPort = Self.validPort(listenPort)
+            defaults.set(listenPort, forKey: "listenPort")
+        }
+    }
     /// KB/s, 0 = unlimited
     var downloadLimitKB: Int { didSet { defaults.set(downloadLimitKB, forKey: "downloadLimitKB") } }
     var uploadLimitKB: Int { didSet { defaults.set(uploadLimitKB, forKey: "uploadLimitKB") } }
@@ -18,6 +25,10 @@ final class AppSettings {
     var enableDHT: Bool { didSet { defaults.set(enableDHT, forKey: "enableDHT") } }
     var enablePortMapping: Bool { didSet { defaults.set(enablePortMapping, forKey: "enablePortMapping") } }
     var requireEncryption: Bool { didSet { defaults.set(requireEncryption, forKey: "requireEncryption") } }
+    /// Hold every transfer while the Mac runs on battery power. See `TransferPolicy`.
+    var pauseOnBattery: Bool { didSet { defaults.set(pauseOnBattery, forKey: "pauseOnBattery") } }
+    /// Hold every transfer on a metered connection (Personal Hotspot, cellular, Low Data Mode).
+    var pauseOnMetered: Bool { didSet { defaults.set(pauseOnMetered, forKey: "pauseOnMetered") } }
 
     var addToLibraryAutomatically: Bool { didSet { defaults.set(addToLibraryAutomatically, forKey: "addToLibrary") } }
     var notifyOnCompletion: Bool { didSet { defaults.set(notifyOnCompletion, forKey: "notifyOnCompletion") } }
@@ -25,13 +36,59 @@ final class AppSettings {
     var compressOnComplete: Bool { didSet { defaults.set(compressOnComplete, forKey: "compressOnComplete") } }
     /// Pack items nobody has opened for this many days into archives; 0 = never.
     var autoPackAfterDays: Int { didSet { defaults.set(autoPackAfterDays, forKey: "autoPackAfterDays") } }
+    /// Unfinished files are named `name.part` on disk until they finish downloading.
+    var partSuffix: Bool { didSet { defaults.set(partSuffix, forKey: "partSuffix") } }
+    /// Torrent files that show up in this folder are added automatically.
+    var watchFolderEnabled: Bool { didSet { defaults.set(watchFolderEnabled, forKey: "watchFolderEnabled") } }
+    var watchFolder: String { didSet { defaults.set(watchFolder, forKey: "watchFolder") } }
+    var watchFolderAction: WatchFolderAction {
+        didSet { defaults.set(watchFolderAction.rawValue, forKey: "watchFolderAction") }
+    }
+    /// Post a notification when the watched folder adds torrents.
+    var watchFolderNotify: Bool { didSet { defaults.set(watchFolderNotify, forKey: "watchFolderNotify") } }
     var hideAdultResults: Bool { didSet { defaults.set(hideAdultResults, forKey: "hideAdultResults") } }
     var showMenuBarItem: Bool { didSet { defaults.set(showMenuBarItem, forKey: "showMenuBarItem") } }
 
-    /// ISO 639-1 codes in order of preference, e.g. ["en", "es"].
+    /// Subtitle language ids in order of preference, e.g. ["pt-pt", "en"]. See `SubtitleLanguage`.
     var subtitleLanguages: [String] { didSet { defaults.set(subtitleLanguages, forKey: "subtitleLanguages") } }
     var autoLoadSubtitles: Bool { didSet { defaults.set(autoLoadSubtitles, forKey: "autoLoadSubtitles") } }
     var subtitleFontScale: Double { didSet { defaults.set(subtitleFontScale, forKey: "subtitleFontScale") } }
+    /// An installed font family for subtitles, or "" for the system font.
+    var subtitleFontFamily: String { didSet { defaults.set(subtitleFontFamily, forKey: "subtitleFontFamily") } }
+    /// See `SubtitleStyle.fontFace`.
+    var subtitleFontFace: String { didSet { defaults.set(subtitleFontFace, forKey: "subtitleFontFace") } }
+    var subtitleTextColor: SubtitleTextColor {
+        didSet { defaults.set(subtitleTextColor.rawValue, forKey: "subtitleTextColor") }
+    }
+    /// "#RRGGBB" for `SubtitleTextColor.custom`.
+    var subtitleCustomColor: String { didSet { defaults.set(subtitleCustomColor, forKey: "subtitleCustomColor") } }
+
+    var subtitleStyle: SubtitleStyle {
+        get {
+            SubtitleStyle(fontFamily: subtitleFontFamily, fontFace: subtitleFontFace, scale: subtitleFontScale,
+                          color: subtitleTextColor, customColor: subtitleCustomColor)
+        }
+        set {
+            subtitleFontFamily = newValue.fontFamily
+            subtitleFontFace = newValue.fontFace
+            subtitleFontScale = newValue.scale
+            subtitleTextColor = newValue.color
+            subtitleCustomColor = newValue.customColor
+        }
+    }
+
+    /// Trackers added to every transfer, and trackers removed from every transfer. Never overlapping.
+    private(set) var mergeTrackers: [String] { didSet { defaults.set(mergeTrackers, forKey: "mergeTrackers") } }
+    private(set) var filterTrackers: [String] { didSet { defaults.set(filterTrackers, forKey: "filterTrackers") } }
+
+    /// Peers in the blocklist's address ranges are refused.
+    var blocklistEnabled: Bool { didSet { defaults.set(blocklistEnabled, forKey: "blocklistEnabled") } }
+    var blocklistURL: String { didSet { defaults.set(blocklistURL, forKey: "blocklistURL") } }
+    var blocklistAutoUpdate: Bool { didSet { defaults.set(blocklistAutoUpdate, forKey: "blocklistAutoUpdate") } }
+    /// Where the list in force came from (a web address or a file name), its rule count and when it was installed.
+    var blocklistSource: String { didSet { defaults.set(blocklistSource, forKey: "blocklistSource") } }
+    var blocklistRuleCount: Int { didSet { defaults.set(blocklistRuleCount, forKey: "blocklistRuleCount") } }
+    var blocklistUpdated: Date? { didSet { defaults.set(blocklistUpdated, forKey: "blocklistUpdated") } }
 
     var openSubtitlesKey: String { didSet { Keychain.set(openSubtitlesKey, for: "openSubtitlesKey") } }
     var openSubtitlesUser: String { didSet { defaults.set(openSubtitlesUser, forKey: "openSubtitlesUser") } }
@@ -43,6 +100,7 @@ final class AppSettings {
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].path
         defaults.register(defaults: [
             "downloadFolder": downloads,
+            "watchFolder": downloads,
             "listenPort": 6881,
             "maxActiveDownloads": 5,
             "maxActiveSeeds": 5,
@@ -52,12 +110,15 @@ final class AppSettings {
             "notifyOnCompletion": true,
             "showMenuBarItem": true,
             "compressOnComplete": true,
-            "subtitleLanguages": [Locale.current.language.languageCode?.identifier ?? "en"],
+            "subtitleLanguages": SubtitleLanguage.defaultPreferences(),
             "autoLoadSubtitles": true,
             "subtitleFontScale": 1.0,
+            "subtitleFontFace": SubtitleTypeface.defaultSystemFace,
+            "subtitleCustomColor": SubtitleStyle.defaultCustomColor,
+            "blocklistAutoUpdate": true,
         ])
         downloadFolder = defaults.string(forKey: "downloadFolder") ?? downloads
-        listenPort = defaults.integer(forKey: "listenPort")
+        listenPort = Self.validPort(defaults.integer(forKey: "listenPort"))
         downloadLimitKB = defaults.integer(forKey: "downloadLimitKB")
         uploadLimitKB = defaults.integer(forKey: "uploadLimitKB")
         maxActiveDownloads = defaults.integer(forKey: "maxActiveDownloads")
@@ -65,38 +126,103 @@ final class AppSettings {
         enableDHT = defaults.bool(forKey: "enableDHT")
         enablePortMapping = defaults.bool(forKey: "enablePortMapping")
         requireEncryption = defaults.bool(forKey: "requireEncryption")
+        pauseOnBattery = defaults.bool(forKey: "pauseOnBattery")
+        pauseOnMetered = defaults.bool(forKey: "pauseOnMetered")
         addToLibraryAutomatically = defaults.bool(forKey: "addToLibrary")
         notifyOnCompletion = defaults.bool(forKey: "notifyOnCompletion")
         showMenuBarItem = defaults.bool(forKey: "showMenuBarItem")
         compressOnComplete = defaults.bool(forKey: "compressOnComplete")
         autoPackAfterDays = defaults.integer(forKey: "autoPackAfterDays")
         hideAdultResults = defaults.bool(forKey: "hideAdultResults")
-        subtitleLanguages = defaults.stringArray(forKey: "subtitleLanguages") ?? ["en"]
+        partSuffix = defaults.bool(forKey: "partSuffix")
+        watchFolderEnabled = defaults.bool(forKey: "watchFolderEnabled")
+        watchFolder = defaults.string(forKey: "watchFolder") ?? downloads
+        watchFolderNotify = defaults.bool(forKey: "watchFolderNotify")
+        watchFolderAction = WatchFolderAction(rawValue: defaults.string(forKey: "watchFolderAction") ?? "") ?? .keep
+        let storedLanguages = defaults.stringArray(forKey: "subtitleLanguages") ?? []
+        // Version 2 tells regional variants apart ("pt-pt", "pt-br"); version 1 stored bare ISO 639-1 codes.
+        let languages = defaults.integer(forKey: "subtitleLanguagesVersion") < 2
+            ? SubtitleLanguage.migrate(storedLanguages)
+            : SubtitleLanguage.validated(storedLanguages)
+        if languages != storedLanguages { defaults.set(languages, forKey: "subtitleLanguages") }
+        defaults.set(2, forKey: "subtitleLanguagesVersion")
+        subtitleLanguages = languages
         autoLoadSubtitles = defaults.bool(forKey: "autoLoadSubtitles")
         subtitleFontScale = defaults.double(forKey: "subtitleFontScale")
+        subtitleFontFamily = defaults.string(forKey: "subtitleFontFamily") ?? ""
+        subtitleFontFace = defaults.string(forKey: "subtitleFontFace") ?? SubtitleTypeface.defaultSystemFace
+        subtitleTextColor = SubtitleTextColor(rawValue: defaults.string(forKey: "subtitleTextColor") ?? "") ?? .white
+        subtitleCustomColor = defaults.string(forKey: "subtitleCustomColor") ?? SubtitleStyle.defaultCustomColor
+        mergeTrackers = defaults.stringArray(forKey: "mergeTrackers") ?? []
+        filterTrackers = defaults.stringArray(forKey: "filterTrackers") ?? []
+        blocklistEnabled = defaults.bool(forKey: "blocklistEnabled")
+        blocklistURL = defaults.string(forKey: "blocklistURL") ?? ""
+        blocklistAutoUpdate = defaults.bool(forKey: "blocklistAutoUpdate")
+        blocklistSource = defaults.string(forKey: "blocklistSource") ?? ""
+        blocklistRuleCount = defaults.integer(forKey: "blocklistRuleCount")
+        blocklistUpdated = defaults.object(forKey: "blocklistUpdated") as? Date
         openSubtitlesKey = Keychain.get("openSubtitlesKey")
         openSubtitlesUser = defaults.string(forKey: "openSubtitlesUser") ?? ""
         openSubtitlesPassword = Keychain.get("openSubtitlesPassword")
         tmdbKey = Keychain.get("tmdbKey")
     }
 
+    static func validPort(_ port: Int) -> Int { min(max(port, 0), 65535) }
+
+    func trackers(_ rule: TrackerRule) -> [String] {
+        rule == .merge ? mergeTrackers : filterTrackers
+    }
+
+    /// Adds the trackers that aren't in the list yet and takes them out of the other list.
+    @discardableResult
+    func addTrackers(_ urls: [String], to rule: TrackerRule) -> TrackerImportResult {
+        var result = TrackerImportResult()
+        var list = trackers(rule)
+        var keys = Set(list.map(TrackerList.key))
+        var added = Set<String>()
+        for raw in urls {
+            let url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard TrackerList.isValid(url) else { result.invalid += 1; continue }
+            let key = TrackerList.key(url)
+            guard keys.insert(key).inserted else { result.duplicates += 1; continue }
+            list.append(url)
+            added.insert(key)
+            result.added += 1
+        }
+        guard !added.isEmpty else { return result }
+        let other = trackers(rule == .merge ? .filter : .merge).filter { !added.contains(TrackerList.key($0)) }
+        switch rule {
+        case .merge: mergeTrackers = list; if other.count != filterTrackers.count { filterTrackers = other }
+        case .filter: filterTrackers = list; if other.count != mergeTrackers.count { mergeTrackers = other }
+        }
+        return result
+    }
+
+    func removeTrackers(_ urls: Set<String>, from rule: TrackerRule) {
+        switch rule {
+        case .merge: mergeTrackers.removeAll { urls.contains($0) }
+        case .filter: filterTrackers.removeAll { urls.contains($0) }
+        }
+    }
+
     var sessionSettings: KTSessionSettings {
         let s = KTSessionSettings()
-        s.listenPort = Int32(AppPaths.isTesting ? 0 : listenPort)
-        s.downloadRateLimit = Int32(downloadLimitKB * 1024)
-        s.uploadRateLimit = Int32(uploadLimitKB * 1024)
-        s.maxActiveDownloads = Int32(maxActiveDownloads)
-        s.maxActiveSeeds = Int32(maxActiveSeeds)
+        s.listenPort = Int32(clamping: AppPaths.isTesting ? 0 : Self.validPort(listenPort))
+        s.downloadRateLimit = Int32(clamping: max(0, downloadLimitKB) * 1024)
+        s.uploadRateLimit = Int32(clamping: max(0, uploadLimitKB) * 1024)
+        s.maxActiveDownloads = Int32(clamping: maxActiveDownloads)
+        s.maxActiveSeeds = Int32(clamping: maxActiveSeeds)
         s.enableDHT = enableDHT
         s.enableLSD = true
         s.enablePortMapping = enablePortMapping
         s.requireEncryption = requireEncryption
+        s.partSuffix = partSuffix
         return s
     }
 }
 
 enum Keychain {
-    private static let service = "me.kylebolton.piece"
+    private static let service = Bundle.main.bundleIdentifier ?? "me.kylebolton.piece"
 
     static func get(_ key: String) -> String {
         let query: [String: Any] = [

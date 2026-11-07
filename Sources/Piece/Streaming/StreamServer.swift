@@ -209,7 +209,7 @@ final class StreamServer {
         guard sendHead(connection, status: partial ? "206 Partial Content" : "200 OK", headers: headers),
               request.method == "GET" else { return }
 
-        let path = (status.savePath as NSString).appendingPathComponent(file.path)
+        let finalPath = (status.savePath as NSString).appendingPathComponent(file.path)
         let index = Int32(fileIndex)
         var handle: FileHandle?
         defer { try? handle?.close() }
@@ -229,7 +229,8 @@ final class StreamServer {
                 Thread.sleep(forTimeInterval: 0.2)
                 continue
             }
-            if handle == nil { handle = FileHandle(forReadingAtPath: path) }
+            // Looked up on every attempt: the file may be renamed (`.part` removed) while it is being served.
+            if handle == nil { handle = FileHandle(forReadingAtPath: PartFile.resolve(finalPath)) }
             guard let handle else {
                 Thread.sleep(forTimeInterval: 0.2)
                 continue

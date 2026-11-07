@@ -111,8 +111,8 @@ struct FilmsView: View {
         TagMenu(targets: [film.id.uuidString])
         StorageMenu(itemIDs: [film.id])
         Divider()
-        Button("Remove from Library", systemImage: "minus.circle") { app.library.remove([film.id], moveToTrash: false) }
-        Button("Move to Trash", systemImage: "trash", role: .destructive) { app.library.remove([film.id], moveToTrash: true) }
+        Button("Remove from Library", systemImage: "minus.circle") { app.removeFromLibrary([film.id], moveToTrash: false) }
+        Button("Move to Trash", systemImage: "trash", role: .destructive) { app.removeFromLibrary([film.id], moveToTrash: true) }
     }
 }
 
@@ -141,8 +141,9 @@ struct PosterCell: View {
                                 .font(.system(size: 9, weight: .bold))
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 2)
-                                .background(.black.opacity(0.6), in: Capsule())
+                                .liquidGlassEffect(type: .scrim(opacity: 0.6))
                                 .foregroundStyle(.white)
+                                .environment(\.colorScheme, .dark)
                                 .padding(6)
                         }
                     }
@@ -237,7 +238,7 @@ struct MediaDetailSheet: View {
                             Label(item.playPosition > 30 && !item.isWatched ? "Resume" : "Play", systemImage: "play.fill")
                                 .frame(minWidth: 80)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .liquidGlassButtonStyle(prominent: true)
                         .controlSize(.large)
                         .keyboardShortcut(.defaultAction)
 
@@ -246,6 +247,7 @@ struct MediaDetailSheet: View {
                                 app.play(item, fromStart: true)
                                 dismiss()
                             }
+                            .liquidGlassButtonStyle()
                             .controlSize(.large)
                             Text("\(Format.duration(item.playPosition)) watched").font(.caption).foregroundStyle(.secondary)
                         }
@@ -429,7 +431,7 @@ struct TVView: View {
                                     }
                                     Divider()
                                     Button("Remove from Library", systemImage: "minus.circle") {
-                                        app.library.remove(Set(show.episodes.map(\.id)), moveToTrash: false)
+                                        app.removeFromLibrary(Set(show.episodes.map(\.id)), moveToTrash: false)
                                     }
                                 }
                             }
@@ -487,8 +489,9 @@ struct ShowDetailView: View {
                         .font(.callout.weight(.medium))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(.black.opacity(0.45), in: Capsule())
+                        .liquidGlassEffect(type: .scrim(opacity: 0.45), interactive: true)
                         .foregroundStyle(.white)
+                        .environment(\.colorScheme, .dark)
                 }
                 .buttonStyle(.plain)
                 .padding(12)
@@ -546,7 +549,7 @@ struct ShowDetailView: View {
                     Button("Move to Films", systemImage: "film") { app.library.changeKind(of: episode.id, to: .film) }
                     Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([episode.url]) }
                     Divider()
-                    Button("Remove from Library", systemImage: "minus.circle") { app.library.remove([episode.id], moveToTrash: false) }
+                    Button("Remove from Library", systemImage: "minus.circle") { app.removeFromLibrary([episode.id], moveToTrash: false) }
                 }
             }
             .listStyle(.inset)

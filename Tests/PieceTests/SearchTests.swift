@@ -15,6 +15,10 @@ final class SearchTests: XCTestCase {
         XCTAssertEqual(SizeParser.bytes(in: "700 MiB"), 700 * 1_048_576)
         XCTAssertEqual(SizeParser.bytes(in: "350,5 MB"), Int64(350.5 * 1_048_576))
         XCTAssertNil(SizeParser.bytes(in: "no size here 2024"))
+        XCTAssertEqual(SizeParser.bytes(in: "1,234.5 MB"), Int64(1234.5 * 1_048_576))
+        XCTAssertEqual(SizeParser.bytes(in: "1.234,5 MB"), Int64(1234.5 * 1_048_576))
+        XCTAssertEqual(SizeParser.bytes(in: "1,234 MB"), 1234 * 1_048_576)
+        XCTAssertEqual(SizeParser.bytes(in: "12345 MB"), 12345 * 1_048_576)
     }
 
     func testTorznabFeed() {
@@ -194,6 +198,8 @@ final class SearchTests: XCTestCase {
         ]
         XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(minSeeds: 5)).count, 1)
         XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(size: .huge)).map(\.title), ["Film 2160p"])
+        XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(qualities: [.fullHD, .uhd])).count, 3)
+        XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(qualities: [.fullHD, .hdr])).count, 0)
         XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(qualities: [.fullHD])).count, 2)
         XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter()).count, 3)
     }

@@ -100,8 +100,8 @@ private struct SongsTable: View {
             }
             Button("Refresh Info", systemImage: "arrow.clockwise") { app.library.refreshMetadata(for: Array(ids)) }
             Divider()
-            Button("Remove from Library", systemImage: "minus.circle") { app.library.remove(ids, moveToTrash: false) }
-            Button("Move to Trash", systemImage: "trash", role: .destructive) { app.library.remove(ids, moveToTrash: true) }
+            Button("Remove from Library", systemImage: "minus.circle") { app.removeFromLibrary(ids, moveToTrash: false) }
+            Button("Move to Trash", systemImage: "trash", role: .destructive) { app.removeFromLibrary(ids, moveToTrash: true) }
         } primaryAction: { ids in
             play(ids, in: tracks)
         }
@@ -161,7 +161,7 @@ private struct AlbumSheet: View {
                     } label: {
                         Label("Play", systemImage: "play.fill").frame(minWidth: 70)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .liquidGlassButtonStyle(prominent: true)
                     .padding(.top, 6)
                 }
                 Spacer()
@@ -242,7 +242,7 @@ struct OtherLibraryView: View {
                     TagMenu(targets: ids.map(\.uuidString))
                     StorageMenu(itemIDs: Array(ids))
                     Divider()
-                    Button("Remove from Library", systemImage: "minus.circle") { app.library.remove(ids, moveToTrash: false) }
+                    Button("Remove from Library", systemImage: "minus.circle") { app.removeFromLibrary(ids, moveToTrash: false) }
                 } primaryAction: { ids in
                     reveal(ids, in: items)
                 }
@@ -263,49 +263,64 @@ struct MiniPlayerBar: View {
     var body: some View {
         let audio = app.audio
         if let track = audio.current {
-            VStack(spacing: 0) {
-                Divider()
-                HStack(spacing: 14) {
-                    ArtworkView(url: track.artworkURL, symbol: "music.note", cornerRadius: 5, maxPixel: 120)
-                        .frame(width: 40, height: 40)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(track.title).font(.callout.weight(.medium)).lineLimit(1)
-                        Text([track.artist ?? track.albumArtist, track.album].compactMap { $0 }.joined(separator: " — "))
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    .frame(width: 200, alignment: .leading)
-
-                    HStack(spacing: 16) {
-                        Button { audio.previous() } label: { Image(systemName: "backward.fill") }
-                            .accessibilityLabel("Previous")
-                        Button { audio.toggle() } label: {
-                            Image(systemName: audio.isPlaying ? "pause.fill" : "play.fill").font(.title2).frame(width: 24)
-                        }
-                        .keyboardShortcut(.space, modifiers: [])
-                        .accessibilityLabel(audio.isPlaying ? "Pause" : "Play")
-                        Button { audio.next() } label: { Image(systemName: "forward.fill") }
-                            .disabled(!audio.hasNext)
-                            .accessibilityLabel("Next")
-                    }
-                    .buttonStyle(.plain)
-
-                    Text(Format.duration(audio.time)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                    Slider(value: Binding(get: { audio.duration > 0 ? audio.time / audio.duration : 0 },
-                                          set: { audio.seek(toFraction: $0) }))
-                        .controlSize(.small)
-                        .accessibilityLabel("Position")
-                    Text(Format.duration(audio.duration)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
-
-                    AirPlayButton(player: audio.player).frame(width: 26, height: 26).help("AirPlay")
-                    Button { audio.stop() } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel("Stop")
+            if #available(macOS 26.0, *) {
+                // A floating glass bar, inset from the window edges.
+                controls(track)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .liquidGlassEffect(type: .card(cornerRadius: 18))
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+            } else {
+                VStack(spacing: 0) {
+                    Divider()
+                    controls(track)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .background(.bar)
             }
-            .background(.bar)
+        }
+    }
+
+    private func controls(_ track: MediaItem) -> some View {
+        let audio = app.audio
+        return HStack(spacing: 14) {
+            ArtworkView(url: track.artworkURL, symbol: "music.note", cornerRadius: 5, maxPixel: 120)
+                .frame(width: 40, height: 40)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(track.title).font(.callout.weight(.medium)).lineLimit(1)
+                Text([track.artist ?? track.albumArtist, track.album].compactMap { $0 }.joined(separator: " — "))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(width: 200, alignment: .leading)
+
+            HStack(spacing: 16) {
+                Button { audio.previous() } label: { Image(systemName: "backward.fill") }
+                    .accessibilityLabel("Previous")
+                Button { audio.toggle() } label: {
+                    Image(systemName: audio.isPlaying ? "pause.fill" : "play.fill").font(.title2).frame(width: 24)
+                }
+                .keyboardShortcut(.space, modifiers: [])
+                .accessibilityLabel(audio.isPlaying ? "Pause" : "Play")
+                Button { audio.next() } label: { Image(systemName: "forward.fill") }
+                    .disabled(!audio.hasNext)
+                    .accessibilityLabel("Next")
+            }
+            .buttonStyle(.plain)
+
+            Text(Format.duration(audio.time)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            Slider(value: Binding(get: { audio.duration > 0 ? audio.time / audio.duration : 0 },
+                                  set: { audio.seek(toFraction: $0) }))
+                .controlSize(.small)
+                .accessibilityLabel("Position")
+            Text(Format.duration(audio.duration)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+
+            AirPlayButton(player: audio.player).frame(width: 26, height: 26).help("AirPlay")
+            Button { audio.stop() } label: { Image(systemName: "xmark") }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Stop")
         }
     }
 }

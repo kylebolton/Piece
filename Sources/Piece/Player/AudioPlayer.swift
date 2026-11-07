@@ -19,6 +19,7 @@ final class AudioPlayer {
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var endObserver: NSObjectProtocol?
+    @ObservationIgnored private var itemObservation: NSKeyValueObservation?
 
     init(server: StreamServer, library: LibraryStore) {
         self.server = server
@@ -67,11 +68,20 @@ final class AudioPlayer {
         } else {
             // Ogg, Opus, WMA and friends go through ffmpeg.
             let session = HLSSession(server: server)
-            guard session.start(input: track.path, probe: nil) else { return next() }
+            guard session.start(input: track.path, probe: nil, audioOnly: true) else { return next() }
             hls = session
             url = session.masterURL
         }
-        player.replaceCurrentItem(with: AVPlayerItem(url: url))
+        let item = AVPlayerItem(url: url)
+        // A track that can't be played moves on to the next one instead of stopping the queue.
+        itemObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            guard item.status == .failed else { return }
+            Task { @MainActor in
+                guard let self, self.player.currentItem === item else { return }
+                self.next()
+            }
+        }
+        player.replaceCurrentItem(with: item)
         player.play()
     }
 
@@ -100,6 +110,7 @@ final class AudioPlayer {
     }
 
     func stop() {
+        itemObservation = nil
         player.pause()
         player.replaceCurrentItem(with: nil)
         hls?.stop()

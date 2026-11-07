@@ -112,14 +112,16 @@ enum Magnet {
 }
 
 enum SizeParser {
+    /// A whole number with its separators, then a unit. The lookbehind stops a match from starting
+    /// part-way through a longer number ("12345 MB" must not read as "2345 MB").
     private static let pattern = try! NSRegularExpression(
-        pattern: #"(?i)(\d{1,4}(?:[.,]\d{1,3})?)\s*(bytes|[kmgt]i?b)\b"#)
+        pattern: #"(?i)(?<![\d.,])(\d[\d.,]*)\s*(bytes|[kmgt]i?b)\b"#)
 
-    /// Finds the first size such as "1.4 GB" or "700 MiB" in a piece of text.
+    /// Finds the first size such as "1.4 GB", "700 MiB", "1,234.5 MB" or "350,5 MB" in a piece of text.
     static func bytes(in text: String) -> Int64? {
         let ns = text as NSString
         guard let m = pattern.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
-              let number = Double(ns.substring(with: m.range(at: 1)).replacingOccurrences(of: ",", with: "."))
+              let number = number(ns.substring(with: m.range(at: 1)))
         else { return nil }
         let unit = ns.substring(with: m.range(at: 2)).lowercased()
         let multiplier: Double
@@ -131,6 +133,28 @@ enum SizeParser {
         default: multiplier = 1
         }
         return Int64(number * multiplier)
+    }
+
+    /// Reads "1,234.5", "1.234,5", "12 345", "350,5" or "1,234". With both separators the last one is the
+    /// decimal point; a lone comma followed by exactly three digits groups thousands, otherwise it's decimal.
+    static func number(_ raw: String) -> Double? {
+        var text = raw
+        while let last = text.last, last == "." || last == "," { text.removeLast() }
+        let commas = text.filter { $0 == "," }.count, dots = text.filter { $0 == "." }.count
+        var decimal: Character?
+        if commas > 0, dots > 0 {
+            decimal = text.lastIndex(of: ",")! > text.lastIndex(of: ".")! ? "," : "."
+        } else if commas == 1 {
+            let after = text.split(separator: ",", omittingEmptySubsequences: false).last ?? ""
+            decimal = after.count == 3 ? nil : ","
+        } else if dots == 1 {
+            decimal = "."
+        }
+        var digits = ""
+        for character in text {
+            if character.isNumber { digits.append(character) } else if character == decimal { digits.append(".") }
+        }
+        return Double(digits)
     }
 }
 

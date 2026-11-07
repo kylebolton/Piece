@@ -39,6 +39,13 @@ struct TransfersView: View {
                 .onDeleteCommand { app.pendingRemoval = torrents.filter { app.selectedTorrents.contains($0.id) } }
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !app.torrents.torrents.isEmpty {
+                TransferHoldBanner(policy: app.torrents.policy)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 6)
+            }
+        }
     }
 
     @ViewBuilder
@@ -86,13 +93,14 @@ struct TorrentRow: View {
         case .completed: "checkmark"
         case .paused: "pause.fill"
         case .queued: "clock"
+        case .held: "hourglass"
         case .error: "exclamationmark.triangle.fill"
         }
     }
 
     var body: some View {
         HStack(spacing: 12) {
-            IconTile(symbol: symbol, tint: torrent.phase.tint, size: 32)
+            TorrentIcon(torrent: torrent, symbol: symbol)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(torrent.name)
@@ -122,11 +130,10 @@ struct TorrentRow: View {
                 Button {
                     app.torrents.toggle(torrent)
                 } label: {
-                    Image(systemName: torrent.phase == .paused || torrent.phase == .completed || torrent.phase == .error
-                          ? "arrow.clockwise.circle" : "pause.circle")
+                    Image(systemName: torrent.canResume ? "arrow.clockwise.circle" : "pause.circle")
                         .font(.title3)
                 }
-                .help(torrent.phase == .paused || torrent.phase == .completed ? "Resume" : "Pause")
+                .help(torrent.phase == .held ? "Resume anyway" : torrent.canResume ? "Resume" : "Pause")
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -138,6 +145,46 @@ struct TorrentRow: View {
         .animation(.easeOut(duration: 0.12), value: isHovering)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
+    }
+}
+
+/// Says why transfers are held (battery, metered connection) and lets the user transfer anyway,
+/// or hold them again after doing so. Shows nothing when no rule applies.
+struct TransferHoldBanner: View {
+    var policy: TransferPolicy
+    var compact = false
+
+    private var symbol: String {
+        switch (policy.reasons.contains(.battery), policy.reasons.contains(.metered)) {
+        case (true, false): "battery.25percent"
+        case (false, true): "cellularbars"
+        default: "pause.circle"
+        }
+    }
+
+    var body: some View {
+        if !policy.reasons.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: symbol)
+                    .foregroundStyle(policy.isHolding ? .orange : .secondary)
+                Text(policy.isHolding ? "Transfers paused \(policy.summary)" : "Transferring \(policy.summary)")
+                    .lineLimit(compact ? 2 : 1)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                if policy.isHolding {
+                    Button("Resume Anyway") { policy.overrideHold() }
+                        .help("Transfer until the power or network changes")
+                } else {
+                    Button("Pause Again") { policy.endOverride() }
+                }
+            }
+            .font(compact ? .caption : .callout)
+            .controlSize(.small)
+            .padding(.horizontal, compact ? 10 : 12)
+            .padding(.vertical, compact ? 6 : 7)
+            .background(.orange.opacity(policy.isHolding ? 0.12 : 0.05),
+                        in: RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous))
+        }
     }
 }
 
@@ -213,12 +260,7 @@ struct AddTorrentSheet: View {
         isAdding = true
         Task {
             for entry in links {
-                let text = entry.trimmingCharacters(in: .whitespaces)
-                if text.lowercased().hasPrefix("magnet:") {
-                    app.torrents.add(magnet: text, savePath: folder)
-                } else {
-                    _ = await app.torrents.add(link: text)
-                }
+                _ = await app.torrents.add(link: entry, savePath: folder)
             }
             app.selection = .transfers(.all)
             dismiss()

@@ -50,10 +50,13 @@ final class AppModel {
 
     let settings = AppSettings.shared
     let torrents: TorrentStore
+    let blocklist: BlocklistManager
+    let watchFolder: WatchFolder
     let library = LibraryStore()
     let tags = TagStore()
     let compression: CompressionService
     let search = SearchStore()
+    let savedSearches = SavedSearchStore()
     let server: StreamServer
     let player: PlayerModel
     let audio: AudioPlayer
@@ -70,6 +73,8 @@ final class AppModel {
 
     private init() {
         torrents = TorrentStore(settings: settings)
+        blocklist = BlocklistManager(settings: settings, session: torrents.session)
+        watchFolder = WatchFolder(settings: settings, torrents: torrents)
         compression = CompressionService(library: library)
         server = StreamServer(session: torrents.session)
         player = PlayerModel(server: server, torrents: torrents, library: library)
@@ -81,6 +86,8 @@ final class AppModel {
     func start() {
         server.start()
         torrents.start()
+        blocklist.start()
+        watchFolder.restart()
         startWidgetUpdates()
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(45))
@@ -294,6 +301,20 @@ final class AppModel {
         NSApp.requestUserAttention(.informationalRequest)
     }
 
+    /// Takes items out of the library. Packed items are unpacked first when their files are meant to stay,
+    /// since the archive would otherwise be left with nothing pointing at it.
+    func removeFromLibrary(_ ids: Set<UUID>, moveToTrash: Bool) {
+        let packed = library.items.filter { ids.contains($0.id) && $0.isPacked }
+        guard !moveToTrash, !packed.isEmpty else { return library.remove(ids, moveToTrash: moveToTrash) }
+        library.remove(ids.subtracting(packed.map(\.id)), moveToTrash: false)
+        compression.unpack(packed) { [weak self] in
+            guard let self else { return }
+            // Anything that failed to unpack stays in the library rather than losing its only reference.
+            let restored = Set(packed.map(\.id)).filter { self.library.item($0)?.isPacked == false }
+            self.library.remove(restored, moveToTrash: false)
+        }
+    }
+
     /// Packing deletes the original files, so anything still being shared has to stop first.
     func pack(_ items: [MediaItem]) {
         let hashes = Set(items.compactMap(\.torrentHash))
@@ -348,7 +369,7 @@ extension AppModel {
         return WidgetSnapshot(
             downloadRate: torrents.downloadRate, uploadRate: torrents.uploadRate, activeCount: active.count,
             transfers: active.prefix(4).map {
-                .init(id: $0.id, name: $0.name, progress: $0.progress, status: $0.statusLine, isPaused: $0.phase == .paused)
+                .init(id: $0.id, name: $0.name, progress: $0.progress, status: $0.statusLine, isPaused: $0.isPaused)
             },
             recents: library.items.filter { $0.kind != .track }.sorted { $0.dateAdded > $1.dateAdded }.prefix(4).map {
                 .init(id: $0.id.uuidString, title: $0.kind == .episode ? ($0.showTitle ?? $0.title) : $0.title,
