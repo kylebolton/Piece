@@ -78,11 +78,31 @@ final class CompressionService {
         return before - after
     }
 
+    /// The regular files that make up `url` — itself, or everything inside it when it's a folder (a multi-file
+    /// download kept as one "Other" item) — with the name each is stored under in a pack. A folder's files
+    /// are stored as "Folder/inner/path" so unpacking can rebuild it; a lone file keeps its plain name.
+    nonisolated static func contents(of url: URL) -> [(url: URL, name: String)] {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return [] }
+        guard isDirectory.boolValue else { return [(url, url.lastPathComponent)] }
+        let root = url.standardizedFileURL.path
+        let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey])
+        var files: [(url: URL, name: String)] = []
+        while let file = enumerator?.nextObject() as? URL {
+            guard (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+            let relative = String(file.standardizedFileURL.path.dropFirst(root.count + 1))
+            files.append((file, url.lastPathComponent + "/" + relative))
+        }
+        return files
+    }
+
     func compress(_ items: [MediaItem]) {
         for item in items where !item.isPacked && item.fileExists {
             enqueue(Job(title: item.title, detail: "Compressing…")) { [weak self] job in
                 let url = item.url
-                let saved = await Task.detached(priority: .utility) { try? Self.compressInPlace(url) }.value ?? 0
+                let saved = await Task.detached(priority: .utility) {
+                    Self.contents(of: url).reduce(Int64(0)) { $0 + ((try? Self.compressInPlace($1.url)) ?? 0) }
+                }.value
                 self?.library.update(item.id) { $0.savedBytes = max($0.savedBytes ?? 0, saved) }
                 _ = job
             }
@@ -99,9 +119,13 @@ final class CompressionService {
                 let source = item.url
                 let id = job.id
                 do {
-                    let original = (try? source.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? item.fileSize
+                    let files = Self.contents(of: source)
+                    guard !files.isEmpty else { throw PackError.missing(source.lastPathComponent) }
+                    let original = files.reduce(Int64(0)) {
+                        $0 + Int64((try? $1.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+                    }
                     try await Task.detached(priority: .utility) {
-                        _ = try PackFormat.pack(files: [(source, source.lastPathComponent)], to: destination,
+                        _ = try PackFormat.pack(files: files, to: destination,
                                                 progress: { fraction in Task { @MainActor in self.setProgress(fraction * 0.6, id: id) } },
                                                 isCancelled: { DispatchQueue.main.sync { self.cancelled.contains(id) } })
                         // Check the pack by reading it all back before the original goes anywhere.
@@ -140,7 +164,10 @@ final class CompressionService {
                 let id = job.id
                 do {
                     try await Task.detached(priority: .userInitiated) {
-                        try PackFormat.unpack(pack, destination: { _ in destination },
+                        // Files from a packed folder carry the folder's name; a lone file goes back to its own path.
+                        try PackFormat.unpack(pack, destination: { name in
+                            name.contains("/") ? destination.deletingLastPathComponent().appendingPathComponent(name) : destination
+                        },
                                               progress: { fraction in Task { @MainActor in self.setProgress(fraction, id: id) } },
                                               isCancelled: { DispatchQueue.main.sync { self.cancelled.contains(id) } })
                     }.value
