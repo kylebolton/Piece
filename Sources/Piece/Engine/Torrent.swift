@@ -140,7 +140,10 @@ struct SpeedSample: Hashable {
 
 struct TorrentFile: Identifiable, Hashable {
     var index: Int
+    /// The file's real path in the torrent, with no `.part` suffix.
     var path: String
+    /// What the file is called on disk right now.
+    var diskPath: String
     var size: Int64
     var downloaded: Int64
     var priority: Int
@@ -155,6 +158,7 @@ struct TorrentFile: Identifiable, Hashable {
     init(_ f: KTFileEntry) {
         index = Int(f.index)
         path = f.path
+        diskPath = f.diskPath
         size = f.size
         downloaded = f.downloaded
         priority = Int(f.priority)

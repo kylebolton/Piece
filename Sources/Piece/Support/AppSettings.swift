@@ -25,6 +25,8 @@ final class AppSettings {
     var compressOnComplete: Bool { didSet { defaults.set(compressOnComplete, forKey: "compressOnComplete") } }
     /// Pack items nobody has opened for this many days into archives; 0 = never.
     var autoPackAfterDays: Int { didSet { defaults.set(autoPackAfterDays, forKey: "autoPackAfterDays") } }
+    /// Unfinished files are named `name.part` on disk until they finish downloading.
+    var partSuffix: Bool { didSet { defaults.set(partSuffix, forKey: "partSuffix") } }
     var hideAdultResults: Bool { didSet { defaults.set(hideAdultResults, forKey: "hideAdultResults") } }
     var showMenuBarItem: Bool { didSet { defaults.set(showMenuBarItem, forKey: "showMenuBarItem") } }
 
@@ -85,6 +87,7 @@ final class AppSettings {
         compressOnComplete = defaults.bool(forKey: "compressOnComplete")
         autoPackAfterDays = defaults.integer(forKey: "autoPackAfterDays")
         hideAdultResults = defaults.bool(forKey: "hideAdultResults")
+        partSuffix = defaults.bool(forKey: "partSuffix")
         subtitleLanguages = defaults.stringArray(forKey: "subtitleLanguages") ?? ["en"]
         autoLoadSubtitles = defaults.bool(forKey: "autoLoadSubtitles")
         subtitleFontScale = defaults.double(forKey: "subtitleFontScale")
@@ -149,6 +152,7 @@ final class AppSettings {
         s.enableLSD = true
         s.enablePortMapping = enablePortMapping
         s.requireEncryption = requireEncryption
+        s.partSuffix = partSuffix
         return s
     }
 }

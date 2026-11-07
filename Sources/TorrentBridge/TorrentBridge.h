@@ -46,7 +46,10 @@ NS_SWIFT_SENDABLE
 NS_SWIFT_SENDABLE
 @interface KTFileEntry : NSObject
 @property (nonatomic) int index;
+/// The file's real path inside the torrent; stays the same while it carries a `.part` suffix on disk.
 @property (nonatomic, copy) NSString *path;
+/// What the file is called on disk right now: `path`, or `path` + ".part" while it is incomplete.
+@property (nonatomic, copy) NSString *diskPath;
 @property (nonatomic) int64_t size;
 @property (nonatomic) int64_t downloaded;
 @property (nonatomic) int priority;
@@ -92,6 +95,8 @@ NS_SWIFT_SENDABLE
 @property (nonatomic) BOOL enableLSD;
 @property (nonatomic) BOOL enablePortMapping;
 @property (nonatomic) BOOL requireEncryption;
+/// Incomplete files carry a `.part` suffix on disk until they finish downloading.
+@property (nonatomic) BOOL partSuffix;
 @end
 
 /// Thin wrapper around a libtorrent session. All methods are thread-safe.

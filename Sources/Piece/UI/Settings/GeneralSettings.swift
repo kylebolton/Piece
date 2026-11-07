@@ -22,6 +22,8 @@ struct GeneralSettings: View {
                     }
                 }
             }
+            Toggle("Add .part to files that aren't fully downloaded", isOn: $settings.partSuffix)
+                .help("Unfinished files are named “name.part” on disk and get their real name once they finish. Playing them in Piece still works.")
             Toggle("Notify me when a download finishes", isOn: $settings.notifyOnCompletion)
             Toggle("Show transfer speeds in the menu bar", isOn: $settings.showMenuBarItem)
             Toggle("Hide adult (XXX) results in search", isOn: $settings.hideAdultResults)
@@ -36,6 +38,7 @@ struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
+        .onChange(of: settings.partSuffix) { app.torrents.applySettings(app.settings) }
     }
 }
 

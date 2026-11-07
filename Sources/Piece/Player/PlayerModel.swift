@@ -279,7 +279,7 @@ final class PlayerModel {
             return server.torrentFileURL(hash: hash, fileIndex: index, name: (relativePath as NSString).lastPathComponent,
                                          loopback: true).absoluteString
         }
-        return item.absolutePath
+        return PartFile.resolve(item.absolutePath)
     }
 
     private func open(at position: Double, forceHLS: Bool, withSubtitles: Bool) async {
@@ -322,7 +322,7 @@ final class PlayerModel {
                 status = .preparing("Waiting for the first pieces…")
                 url = server.torrentFileURL(hash: hash, fileIndex: index, name: (relativePath as NSString).lastPathComponent)
             } else {
-                url = URL(fileURLWithPath: item.absolutePath)
+                url = URL(fileURLWithPath: PartFile.resolve(item.absolutePath))
             }
         }
 
@@ -585,7 +585,7 @@ final class PlayerModel {
                 if session.contiguousBytes(inTorrent: hash, file: Int32(index), offset: 0) >= size { break }
                 try await Task.sleep(for: .milliseconds(500))
             }
-            let data = try Data(contentsOf: URL(fileURLWithPath: absolutePath))
+            let data = try Data(contentsOf: URL(fileURLWithPath: PartFile.resolve(absolutePath)))
             return SubtitleParser.parse(SubtitleParser.decode(data), fileExtension: (absolutePath as NSString).pathExtension)
 
         case .embedded(let streamIndex):
@@ -618,7 +618,7 @@ final class PlayerModel {
                   server.session.contiguousBytes(inTorrent: hash, file: Int32(index), offset: size - chunk) >= chunk
             else { return nil }
         }
-        return OpenSubtitles.hash(fileAt: URL(fileURLWithPath: item.absolutePath))
+        return OpenSubtitles.hash(fileAt: URL(fileURLWithPath: PartFile.resolve(item.absolutePath)))
     }
 
     func searchOnline(autoSelect: Bool = false, query customQuery: String? = nil) async {

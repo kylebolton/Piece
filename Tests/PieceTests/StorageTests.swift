@@ -80,3 +80,34 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: text), original)
     }
 }
+
+final class PartFileTests: XCTestCase {
+    private func makeDirectory() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("part-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    func testResolveFindsFinalFile() throws {
+        let dir = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let final = dir.appendingPathComponent("movie.mkv").path
+        try Data([1]).write(to: URL(fileURLWithPath: final))
+        XCTAssertEqual(PartFile.resolve(final), final)
+    }
+
+    func testResolveFallsBackToPartFile() throws {
+        let dir = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let final = dir.appendingPathComponent("movie.mkv").path
+        try Data([1]).write(to: URL(fileURLWithPath: final + ".part"))
+        XCTAssertEqual(PartFile.resolve(final), final + ".part")
+    }
+
+    func testResolveKeepsMissingPath() throws {
+        let dir = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let final = dir.appendingPathComponent("movie.mkv").path
+        XCTAssertEqual(PartFile.resolve(final), final)
+    }
+}

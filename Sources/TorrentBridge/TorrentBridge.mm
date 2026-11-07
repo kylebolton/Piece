@@ -28,6 +28,7 @@
 #include <cctype>
 #include <chrono>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -244,7 +245,8 @@ bool parseBlocklistLine(const std::string &raw, lt::address &first, lt::address 
 lt::settings_pack makePack(KTSessionSettings *s) {
     lt::settings_pack p;
     p.set_int(lt::settings_pack::alert_mask,
-              lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage);
+              lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage |
+              lt::alert_category::file_progress);
     p.set_str(lt::settings_pack::user_agent, "Piece/1.0 libtorrent/2.0");
     p.set_str(lt::settings_pack::peer_fingerprint, lt::generate_fingerprint("KT", 1, 0, 0, 0));
     std::string port = std::to_string(s.listenPort);
@@ -280,11 +282,21 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     std::atomic<int> _pendingResume;
     std::vector<std::string> _mergeTrackers;
     std::set<std::string> _filterKeys;
+    std::atomic<bool> _partSuffix;
+    // Renames in flight, keyed by (torrent, file index), with the name each is headed for.
+    std::mutex _renameMutex;
+    std::map<std::pair<std::string, int>, std::string> _renaming;
+    // "Finished" events held back until the torrent's files have their final names.
+    NSMutableDictionary<NSString *, KTEvent *> *_deferredFinished;
+    NSMutableDictionary<NSString *, NSDate *> *_deferredSince;
 }
 
 - (instancetype)initWithStateDirectory:(NSString *)stateDirectory settings:(KTSessionSettings *)settings {
     if ((self = [super init])) {
         _stateDir = stateDirectory.fileSystemRepresentation;
+        _partSuffix = settings.partSuffix;
+        _deferredFinished = [NSMutableDictionary dictionary];
+        _deferredSince = [NSMutableDictionary dictionary];
         [[NSFileManager defaultManager] createDirectoryAtPath:[stateDirectory stringByAppendingPathComponent:@"resume"]
                                   withIntermediateDirectories:YES
                                                    attributes:nil
@@ -325,6 +337,8 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     // libtorrent throws when a handle has gone away; never let that unwind into Swift.
     try {
         _session->apply_settings(makePack(settings));
+        bool changed = _partSuffix.exchange(settings.partSuffix) != bool(settings.partSuffix);
+        if (changed) [self reconcileAllPartNames];
     } catch (const std::exception &) {
     }
 }
@@ -474,6 +488,11 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             std::lock_guard<std::mutex> lock(_mutex);
             _handles.erase(hash);
         }
+        {
+            std::lock_guard<std::mutex> lock(_renameMutex);
+            for (auto it = _renaming.begin(); it != _renaming.end();)
+                it = it->first.first == hash ? _renaming.erase(it) : std::next(it);
+        }
         _session->remove_torrent(h, deleteFiles ? lt::session::delete_files : lt::remove_flags_t{});
         std::remove([self resumePathFor:hash].c_str());
     } catch (const std::exception &) {
@@ -611,7 +630,8 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             int idx = static_cast<int>(i);
             KTFileEntry *f = [KTFileEntry new];
             f.index = idx;
-            f.path = toNS(fs.file_path(i));
+            f.path = toNS(ti->orig_files().file_path(i));
+            f.diskPath = toNS(fs.file_path(i));
             f.size = fs.file_size(i);
             f.downloaded = idx < static_cast<int>(progress.size()) ? progress[idx] : 0;
             f.priority = idx < static_cast<int>(priorities.size())
@@ -911,12 +931,90 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     return nil;
 }
 
+// MARK: - Part files
+
+/// Brings every file's name on disk in line with its state: `name.part` while incomplete (when the
+/// option is on), the torrent's own name otherwise. Safe to call at any time; it only renames what differs.
+- (void)reconcilePartNames:(lt::torrent_handle &)h {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        if (!h.is_valid()) return;
+        lt::torrent_status st = h.status(lt::status_flags_t{});
+        // Until the check is done nothing is known about which files are complete.
+        if (!st.has_metadata || st.state == lt::torrent_status::checking_files ||
+            st.state == lt::torrent_status::checking_resume_data ||
+            st.state == lt::torrent_status::downloading_metadata) return;
+        auto ti = h.torrent_file();
+        if (!ti) return;
+        const lt::file_storage &fs = ti->files();
+        const lt::file_storage &orig = ti->orig_files();
+        if (fs.num_files() != orig.num_files()) return;
+        std::vector<std::int64_t> progress;
+        h.file_progress(progress, lt::torrent_handle::piece_granularity);
+        std::string hash = hashString(h);
+        bool enabled = _partSuffix;
+        for (lt::file_index_t i : fs.file_range()) {
+            if (fs.pad_file_at(i)) continue;
+            int idx = static_cast<int>(i);
+            bool complete = fs.file_size(i) == 0 ||
+                            (idx < static_cast<int>(progress.size()) && progress[idx] >= fs.file_size(i));
+            std::string target = orig.file_path(i);
+            if (enabled && !complete) target += ".part";
+            if (fs.file_path(i) == target) continue;
+            {
+                std::lock_guard<std::mutex> lock(_renameMutex);
+                auto &pending = _renaming[{hash, idx}];
+                if (pending == target) continue;
+                pending = target;
+            }
+            h.rename_file(i, target);
+        }
+    } catch (const std::exception &) {
+    }
+}
+
+- (void)reconcileAllPartNames {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        std::vector<lt::torrent_handle> handles;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            for (auto &entry : _handles) handles.push_back(entry.second);
+        }
+        for (lt::torrent_handle &h : handles) [self reconcilePartNames:h];
+    } catch (const std::exception &) {
+    }
+}
+
+- (void)renameFinished:(const lt::torrent_handle &)h file:(lt::file_index_t)index {
+    std::lock_guard<std::mutex> lock(_renameMutex);
+    _renaming.erase({hashString(h), static_cast<int>(index)});
+}
+
+- (BOOL)hasRenamesInFlightFor:(const std::string &)hash {
+    std::lock_guard<std::mutex> lock(_renameMutex);
+    auto it = _renaming.lower_bound({hash, std::numeric_limits<int>::min()});
+    return it != _renaming.end() && it->first.first == hash;
+}
+
+/// Moves a held-back "finished" event into `out` once its torrent has no renames left (or has waited too long).
+- (void)releaseDeferredFinished:(NSMutableArray<KTEvent *> *)out forHash:(NSString *)hash force:(BOOL)force {
+    KTEvent *event = _deferredFinished[hash];
+    if (!event) return;
+    if (!force && [self hasRenamesInFlightFor:hash.UTF8String]) return;
+    [out addObject:event];
+    [_deferredFinished removeObjectForKey:hash];
+    [_deferredSince removeObjectForKey:hash];
+}
+
 - (NSArray<KTEvent *> *)pollEvents {
     // libtorrent throws when a handle has gone away; never let that unwind into Swift.
     try {
         std::vector<lt::alert *> alerts;
         _session->pop_alerts(&alerts);
         NSMutableArray<KTEvent *> *out = [NSMutableArray array];
+        // Torrents whose file names changed; their resume data is rewritten once, so a crash can't leave it pointing at old names.
+        std::map<std::string, lt::torrent_handle> renamed;
         for (lt::alert *a : alerts) {
             try {
             if (auto *rd = lt::alert_cast<lt::save_resume_data_alert>(a)) {
@@ -936,9 +1034,27 @@ lt::settings_pack makePack(KTSessionSettings *s) {
                 e.type = KTEventTypeFinished;
                 e.infoHash = toNS(hashString(fin->handle));
                 e.message = toNS(fin->torrent_name());
-                [out addObject:e];
+                // The library reads the files as soon as it hears this, so wait until they have their final names.
+                [self reconcilePartNames:fin->handle];
+                if ([self hasRenamesInFlightFor:hashString(fin->handle)]) {
+                    _deferredFinished[e.infoHash] = e;
+                    _deferredSince[e.infoHash] = [NSDate date];
+                } else {
+                    [out addObject:e];
+                }
                 fin->handle.save_resume_data(lt::torrent_handle::save_info_dict);
                 ++_pendingResume;
+            } else if (auto *fc = lt::alert_cast<lt::file_completed_alert>(a)) {
+                [self reconcilePartNames:fc->handle];
+            } else if (auto *sc = lt::alert_cast<lt::state_changed_alert>(a)) {
+                [self reconcilePartNames:sc->handle];
+            } else if (auto *fr = lt::alert_cast<lt::file_renamed_alert>(a)) {
+                [self renameFinished:fr->handle file:fr->index];
+                renamed[hashString(fr->handle)] = fr->handle;
+                [self releaseDeferredFinished:out forHash:toNS(hashString(fr->handle)) force:NO];
+            } else if (auto *ff = lt::alert_cast<lt::file_rename_failed_alert>(a)) {
+                [self renameFinished:ff->handle file:ff->index];
+                [self releaseDeferredFinished:out forHash:toNS(hashString(ff->handle)) force:NO];
             } else if (auto *md = lt::alert_cast<lt::metadata_received_alert>(a)) {
                 KTEvent *e = [KTEvent new];
                 e.type = KTEventTypeMetadataReceived;
@@ -964,6 +1080,14 @@ lt::settings_pack makePack(KTSessionSettings *s) {
                 // The alert's torrent was removed before it was processed.
             }
         }
+        for (auto &entry : renamed) {
+            if (!entry.second.is_valid()) continue;
+            entry.second.save_resume_data(lt::torrent_handle::save_info_dict);
+            ++_pendingResume;
+        }
+        for (NSString *hash in [_deferredSince allKeys]) {
+            if (-[_deferredSince[hash] timeIntervalSinceNow] > 10) [self releaseDeferredFinished:out forHash:hash force:YES];
+        }
         return out;
     } catch (const std::exception &) {
     }
@@ -973,6 +1097,8 @@ lt::settings_pack makePack(KTSessionSettings *s) {
 - (void)saveResumeData {
     // libtorrent throws when a handle has gone away; never let that unwind into Swift.
     try {
+        // Picks up anything the alerts missed, such as a paused torrent that never changed state.
+        if (!_session->is_paused()) [self reconcileAllPartNames];
         std::vector<lt::torrent_handle> handles;
         {
             std::lock_guard<std::mutex> lock(_mutex);

@@ -296,13 +296,20 @@ final class TorrentStore {
         (torrent.savePath as NSString).appendingPathComponent(file.path)
     }
 
+    /// The file as it is on disk right now: its final path, or the `.part` one while it is still downloading.
+    func onDiskPath(of file: TorrentFile, in torrent: Torrent) -> String {
+        let final = absolutePath(of: file, in: torrent)
+        let current = (torrent.savePath as NSString).appendingPathComponent(file.diskPath)
+        return FileManager.default.fileExists(atPath: current) ? current : PartFile.resolve(final)
+    }
+
     /// Top-level file or folder the torrent was saved as.
     func contentURL(of torrent: Torrent) -> URL {
         URL(fileURLWithPath: torrent.savePath).appendingPathComponent(torrent.name)
     }
 
     func revealInFinder(_ torrent: Torrent) {
-        let url = contentURL(of: torrent)
+        let url = URL(fileURLWithPath: PartFile.resolve(contentURL(of: torrent).path))
         if FileManager.default.fileExists(atPath: url.path) {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } else {

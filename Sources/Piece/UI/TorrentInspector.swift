@@ -195,7 +195,7 @@ private struct FilesTab: View {
                         app.torrents.setWanted(wanted, file: file.index, in: torrent.id)
                         if let index = files.firstIndex(where: { $0.index == file.index }) { files[index].priority = wanted ? 4 : 0 }
                     } quickLook: {
-                        quickLookURL = URL(fileURLWithPath: app.torrents.absolutePath(of: file, in: torrent))
+                        quickLookURL = URL(fileURLWithPath: app.torrents.onDiskPath(of: file, in: torrent))
                     }
                     .listRowInsets(EdgeInsets(top: 4, leading: 6, bottom: 4, trailing: 8))
                 }

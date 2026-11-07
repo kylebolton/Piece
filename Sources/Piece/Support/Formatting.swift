@@ -118,6 +118,20 @@ enum FileKind {
     }
 }
 
+/// Files that are still downloading can carry a `.part` suffix on disk (see the "Add .part" setting).
+enum PartFile {
+    static let suffix = ".part"
+
+    /// `path` if that file exists, otherwise `path.part` if that does, otherwise `path`.
+    /// Everything in the app refers to a file by its final name; this finds where it is right now.
+    static func resolve(_ path: String) -> String {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: path) { return path }
+        let partial = path + suffix
+        return fm.fileExists(atPath: partial) ? partial : path
+    }
+}
+
 enum AppPaths {
     /// True when the app is only running as the host for unit tests.
     static let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil

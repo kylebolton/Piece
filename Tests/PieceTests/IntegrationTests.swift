@@ -161,6 +161,73 @@ final class IntegrationTests: XCTestCase {
         player.pause()
     }
 
+    /// Polls the engine (which is what processes its alerts) until `condition` holds.
+    private func wait(timeout: TimeInterval = 20, _ condition: () -> Bool) -> [KTEvent] {
+        var events: [KTEvent] = []
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            events += session.pollEvents()
+            if condition() { return events }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTFail("Timed out waiting for the engine")
+        return events
+    }
+
+    func testPartSuffixFollowsDownloadState() throws {
+        let settings = KTSessionSettings()
+        settings.listenPort = 0
+        settings.enableDHT = false
+        settings.enableLSD = false
+        settings.enablePortMapping = false
+        settings.partSuffix = true
+        session.apply(settings)
+
+        var good = Data(count: 4_000_000)
+        for index in good.indices { good[index] = UInt8(truncatingIfNeeded: index &* 31 &+ index / 255) }
+        let source = folder.appendingPathComponent("source/movie.mp4")
+        try FileManager.default.createDirectory(at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try good.write(to: source)
+        let torrent = try XCTUnwrap(KTSession.createTorrent(forPath: source.path))
+
+        // The download folder holds a copy whose second half is wrong, so the torrent can't finish.
+        var bad = good
+        for index in 2_000_000..<bad.count { bad[index] = 0 }
+        let data = folder.appendingPathComponent("data")
+        let final = data.appendingPathComponent("movie.mp4")
+        let partial = data.appendingPathComponent("movie.mp4.part")
+        try bad.write(to: final)
+        let hash = try session.addTorrentData(torrent, savePath: data.path)
+        func entry() -> KTFileEntry? { session.files(forTorrent: hash).first }
+
+        _ = wait { entry()?.diskPath == "movie.mp4.part" }
+        XCTAssertEqual(entry()?.path, "movie.mp4", "The real name must not change")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: partial.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: final.path))
+        XCTAssertEqual(PartFile.resolve(final.path), partial.path)
+
+        // Turning the option off gives the file its real name back, and on puts the suffix on again.
+        settings.partSuffix = false
+        session.apply(settings)
+        _ = wait { entry()?.diskPath == "movie.mp4" }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: final.path))
+        settings.partSuffix = true
+        session.apply(settings)
+        _ = wait { entry()?.diskPath == "movie.mp4.part" }
+
+        // Once the data is right the file finishes and loses the suffix before the app is told.
+        try good.write(to: partial)
+        session.recheck(hash)
+        var finishedWithFinalName = false
+        let events = wait {
+            entry()?.diskPath == "movie.mp4" && FileManager.default.fileExists(atPath: final.path)
+        }
+        finishedWithFinalName = events.contains { $0.type == .finished && FileManager.default.fileExists(atPath: final.path) }
+        XCTAssertTrue(finishedWithFinalName)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: partial.path))
+        XCTAssertEqual(try Data(contentsOf: final), good)
+    }
+
     func testResumeDataSurvivesRestart() throws {
         let file = folder.appendingPathComponent("data/notes.txt")
         try Data(repeating: 7, count: 200_000).write(to: file)
