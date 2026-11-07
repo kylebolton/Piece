@@ -11,8 +11,16 @@ struct NetworkSettings: View {
                 LabeledContent("Upload") { limitField($settings.uploadLimitKB) }
             }
             Section("Queue") {
-                Stepper("Download up to \(settings.maxActiveDownloads) at once", value: $settings.maxActiveDownloads, in: 1...50)
-                Stepper("Seed up to \(settings.maxActiveSeeds) at once", value: $settings.maxActiveSeeds, in: 0...100)
+                Stepper("Download up to **\(settings.maxActiveDownloads)** at once",
+                        value: $settings.maxActiveDownloads,
+                        in: 1...50)
+                .monospacedDigit()
+                Stepper(
+                    "Seed up to **\(settings.maxActiveSeeds)** at once",
+                    value: $settings.maxActiveSeeds,
+                    in: 0...100
+                )
+                .monospacedDigit()
             }
             Section("Connection") {
                 LabeledContent("Incoming port") {
