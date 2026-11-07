@@ -57,6 +57,12 @@ final class ReleaseNameParserTests: XCTestCase {
         XCTAssertEqual(episode?.season, 1)
         XCTAssertEqual(episode?.episode, 3)
 
+        let inSeasonFolder = LibraryStore.classify(path: "/d/The Wire/Season 2/03 - Hot Shots.mkv", size: 900_000_000)
+        XCTAssertEqual(inSeasonFolder?.kind, .episode)
+        XCTAssertEqual(inSeasonFolder?.showTitle, "The Wire")
+        XCTAssertEqual(inSeasonFolder?.season, 2)
+        XCTAssertEqual(inSeasonFolder?.episode, 3)
+
         let track = LibraryStore.classify(path: "/d/Album Name/03 - Song Title.flac", size: 30_000_000)
         XCTAssertEqual(track?.kind, .track)
         XCTAssertEqual(track?.title, "Song Title")
