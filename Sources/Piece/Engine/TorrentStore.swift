@@ -216,7 +216,9 @@ final class TorrentStore {
 
     func pause(_ torrent: Torrent) {
         policy.forget(torrent.id)
-        session.pauseTorrent(torrent.id)
+        let session = session, id = torrent.id
+        // On the engine queue like resume, so the two always run in the order they were asked for.
+        queue.async { session.pauseTorrent(id) }
         refresh()
     }
 
@@ -256,7 +258,8 @@ final class TorrentStore {
 
     func pauseAll() {
         policy.endOverride()
-        torrents.forEach { session.pauseTorrent($0.id) }
+        let session = session, ids = torrents.map(\.id)
+        queue.async { ids.forEach(session.pauseTorrent) }
         refresh()
     }
 
