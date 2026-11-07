@@ -108,7 +108,8 @@ enum PackFormat {
         try input.seek(toOffset: end - UInt64(magic.count) - 8)
         guard let tail = try input.read(upToCount: 8 + magic.count), tail.suffix(magic.count) == magic else { throw PackError.corrupt("no footer") }
         let length = tail.prefix(8).withUnsafeBytes { $0.loadUnaligned(as: UInt64.self) }.littleEndian
-        guard length < end else { throw PackError.corrupt("bad manifest size") }
+        // The manifest sits between the header and the footer; anything longer can't be real (and would underflow).
+        guard length <= end - UInt64(magic.count * 2 + 8) else { throw PackError.corrupt("bad manifest size") }
         try input.seek(toOffset: end - UInt64(magic.count) - 8 - length)
         guard let json = try input.read(upToCount: Int(length)),
               let manifest = try? JSONDecoder().decode(PackManifest.self, from: json) else { throw PackError.corrupt("bad manifest") }

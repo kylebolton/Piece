@@ -56,6 +56,18 @@ final class StorageTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: out.path))
     }
 
+    func testOversizedManifestLengthIsRejected() throws {
+        let text = try makeText("a.txt", megabytes: 1)
+        let pack = folder.appendingPathComponent("y.piecepack")
+        _ = try PackFormat.pack(files: [(text, "a.txt")], to: pack)
+        var bytes = try Data(contentsOf: pack)
+        // The manifest length sits just before the closing magic; claim it fills the whole file.
+        let length = UInt64(bytes.count - 8).littleEndian
+        withUnsafeBytes(of: length) { bytes.replaceSubrange(bytes.count - 16..<bytes.count - 8, with: $0) }
+        try bytes.write(to: pack)
+        XCTAssertThrowsError(try PackFormat.manifest(of: pack))
+    }
+
     func testCancelledPackLeavesNoFile() throws {
         let text = try makeText("a.txt", megabytes: 9)
         let pack = folder.appendingPathComponent("x.piecepack")
