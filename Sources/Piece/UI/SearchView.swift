@@ -274,7 +274,11 @@ struct SearchView: View {
             defer { resolving.remove(result.id) }
             do {
                 let link = try await SearchEngine.resolve(result)
-                if await app.torrents.add(link: link) != nil { added.insert(result.id) }
+                if await app.torrents.add(link: link) != nil {
+                    added.insert(result.id)
+                    let title = result.title.count > 36 ? result.title.prefix(35) + "…" : result.title
+                    Toast.show("Added to transfers: \(title)")
+                }
             } catch {
                 app.torrents.lastError = error.localizedDescription
             }

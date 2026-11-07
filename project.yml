@@ -13,6 +13,9 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: 2.6.4
+  MacToastKit:
+    url: https://github.com/daniyalmaster693/MacToastKit
+    from: 1.0.0
 
 settings:
   base:
@@ -39,6 +42,7 @@ targets:
       - target: PieceWidget
       - package: SwiftSoup
       - package: Sparkle
+      - package: MacToastKit
       - sdk: libc++.tbd
       - sdk: CoreFoundation.framework
       - sdk: SystemConfiguration.framework
