@@ -135,8 +135,9 @@ final class HLSSession {
     var masterURL: URL { server.hlsURL(sessionID: id, file: "master.m3u8") }
 
     /// Builds the ffmpeg arguments: copy streams when AVPlayer can play them, re-encode otherwise.
+    /// `audioOnly` drops every picture stream, such as a music file's cover art, which can't go into the stream.
     static func arguments(input: String, probe: MediaProbe?, audioStream: Int?, startTime: Double,
-                          outputDirectory: String) -> [String] {
+                          outputDirectory: String, audioOnly: Bool = false) -> [String] {
         var args = ["-hide_banner", "-loglevel", "warning", "-nostdin"]
         if startTime > 0 { args += ["-ss", String(format: "%.3f", startTime)] }
         args += ["-fflags", "+genpts", "-i", input]
@@ -144,7 +145,9 @@ final class HLSSession {
         let video = probe?.video
         let audio = probe?.audio.first { $0.index == audioStream } ?? probe?.audio.first { $0.isDefault } ?? probe?.audio.first
 
-        if let video {
+        if audioOnly {
+            args += ["-vn"]
+        } else if let video {
             args += ["-map", "0:\(video.index)"]
             if MediaProbe.copyableVideoCodecs.contains(video.codec) {
                 args += ["-c:v", "copy"]
@@ -212,7 +215,7 @@ final class HLSSession {
     }
 
     func start(input: String, probe: MediaProbe?, audioStream: Int? = nil, startTime: Double = 0,
-               subtitles: (name: String, language: String?, cues: [SubtitleCue])? = nil) -> Bool {
+               subtitles: (name: String, language: String?, cues: [SubtitleCue])? = nil, audioOnly: Bool = false) -> Bool {
         guard let ffmpeg = AppPaths.helper("ffmpeg") else { return false }
 
         if let subtitles, !subtitles.cues.isEmpty {
@@ -235,7 +238,7 @@ final class HLSSession {
         let process = Process()
         process.executableURL = ffmpeg
         process.arguments = Self.arguments(input: input, probe: probe, audioStream: audioStream,
-                                           startTime: startTime, outputDirectory: directory.path)
+                                           startTime: startTime, outputDirectory: directory.path, audioOnly: audioOnly)
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         let errors = Pipe()
