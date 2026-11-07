@@ -107,10 +107,15 @@ private struct AppCommands: Commands {
         CommandMenu("Playback") {
             Button("Play / Pause") { app.player.togglePlayPause() }.keyboardShortcut("p", modifiers: [.command, .option])
             Divider()
-            Button("Skip Back 10 Seconds") { app.player.skip(by: -10) }.keyboardShortcut(.leftArrow, modifiers: .command)
-            Button("Skip Forward 10 Seconds") { app.player.skip(by: 10) }.keyboardShortcut(.rightArrow, modifiers: .command)
-            Button("Skip Back 30 Seconds") { app.player.skip(by: -30) }.keyboardShortcut(.leftArrow, modifiers: [.command, .option])
-            Button("Skip Forward 30 Seconds") { app.player.skip(by: 30) }.keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            // ⌘← and ⌘→ also move the cursor in text fields; an enabled menu item would take them even with
+            // nothing playing, so these are only enabled while something is.
+            Group {
+                Button("Skip Back 10 Seconds") { app.player.skip(by: -10) }.keyboardShortcut(.leftArrow, modifiers: .command)
+                Button("Skip Forward 10 Seconds") { app.player.skip(by: 10) }.keyboardShortcut(.rightArrow, modifiers: .command)
+                Button("Skip Back 30 Seconds") { app.player.skip(by: -30) }.keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                Button("Skip Forward 30 Seconds") { app.player.skip(by: 30) }.keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            }
+            .disabled(app.player.item == nil)
             Divider()
             Button("Faster") { app.player.stepRate(1) }.keyboardShortcut("]", modifiers: .command)
             Button("Slower") { app.player.stepRate(-1) }.keyboardShortcut("[", modifiers: .command)
