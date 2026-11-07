@@ -133,7 +133,7 @@ struct TorrentRow: View {
                     Image(systemName: torrent.canResume ? "arrow.clockwise.circle" : "pause.circle")
                         .font(.title3)
                 }
-                .help(torrent.phase == .held ? "Resume anyway" : torrent.canResume && torrent.phase != .error ? "Resume" : "Pause")
+                .help(torrent.phase == .held ? "Resume anyway" : torrent.canResume ? "Resume" : "Pause")
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
