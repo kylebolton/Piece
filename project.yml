@@ -15,7 +15,7 @@ packages:
     from: 2.6.4
   MacToastKit:
     url: https://github.com/daniyalmaster693/MacToastKit
-    from: 1.0.0
+    branch: main
 
 settings:
   base:
