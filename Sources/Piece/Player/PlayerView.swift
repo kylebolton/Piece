@@ -3,20 +3,101 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct VideoSurface: NSViewRepresentable {
-    var player: AVPlayer
+    var model: PlayerModel
 
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
-        view.player = player
+        view.player = model.player
         view.controlsStyle = .floating
         view.showsFullScreenToggleButton = true
         view.allowsPictureInPicturePlayback = true
         view.videoGravity = .resizeAspect
+
+        // Full screen moves the AVPlayerView into a window of its own, leaving sibling SwiftUI
+        // views behind. Subtitles live in its content overlay so they travel with the video.
+        if let overlay = view.contentOverlayView {
+            let activity = ControlsActivity()
+            let host = SubtitleHostingView(rootView: SubtitleOverlay(model: model, activity: activity))
+            host.activity = activity
+            host.frame = overlay.bounds
+            host.autoresizingMask = [.width, .height]
+            overlay.addSubview(host)
+        }
         return view
     }
 
     func updateNSView(_ view: AVPlayerView, context: Context) {
-        if view.player !== player { view.player = player }
+        if view.player !== model.player { view.player = model.player }
+    }
+}
+
+/// Whether the player's floating transport controls are probably showing, judged by mouse movement.
+@MainActor @Observable
+final class ControlsActivity {
+    private(set) var isActive = false
+    private var hideTask: Task<Void, Never>?
+
+    func pulse() {
+        if !isActive { isActive = true }
+        hideTask?.cancel()
+        hideTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            isActive = false
+        }
+    }
+
+    func end() {
+        hideTask?.cancel()
+        isActive = false
+    }
+}
+
+/// Hosts the subtitles inside the video's overlay. Lets clicks through to the player and watches the mouse,
+/// since the window's own hover tracking doesn't reach a full-screen player.
+private final class SubtitleHostingView: NSHostingView<SubtitleOverlay> {
+    var activity: ControlsActivity?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.owner === self { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { activity?.pulse() }
+    override func mouseMoved(with event: NSEvent) { activity?.pulse() }
+    override func mouseExited(with event: NSEvent) { activity?.end() }
+}
+
+/// Subtitles drawn by the app, so any file format and timing offset works.
+struct SubtitleOverlay: View {
+    var model: PlayerModel
+    var activity: ControlsActivity
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let cue = model.cueText, !model.isExternal {
+                VStack {
+                    Spacer()
+                    let style = AppSettings.shared.subtitleStyle
+                    Text(cue)
+                        .font(style.font(size: max(16, proxy.size.height * 0.045) * style.scale))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(style.textColor)
+                        .shadow(color: .black, radius: 2, x: 0, y: 1)
+                        .shadow(color: .black.opacity(0.8), radius: 6)
+                        .padding(.horizontal, 28)
+                        // Step above the floating transport controls while they're showing.
+                        .padding(.bottom, activity.isActive ? max(150, proxy.size.height * 0.3) : proxy.size.height * 0.07)
+                        .frame(maxWidth: .infinity)
+                }
+                .animation(.easeOut(duration: 0.2), value: activity.isActive)
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 
@@ -30,28 +111,7 @@ struct PlayerWindow: View {
         let model = app.player
         ZStack {
             Color.black
-            VideoSurface(player: model.player)
-
-            // Subtitles drawn by the app, so any file format and timing offset works.
-            if let cue = model.cueText, !model.isExternal {
-                GeometryReader { proxy in
-                    VStack {
-                        Spacer()
-                        let style = AppSettings.shared.subtitleStyle
-                        Text(cue)
-                            .font(style.font(size: max(16, proxy.size.height * 0.045) * style.scale))
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(style.textColor)
-                            .shadow(color: .black, radius: 2, x: 0, y: 1)
-                            .shadow(color: .black.opacity(0.8), radius: 6)
-                            .padding(.horizontal, 28)
-                            // Step above the floating transport controls while they're showing.
-                            .padding(.bottom, isHovering ? max(150, proxy.size.height * 0.3) : proxy.size.height * 0.07)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .allowsHitTesting(false)
-            }
+            VideoSurface(model: model)
 
             statusOverlay(model)
 
