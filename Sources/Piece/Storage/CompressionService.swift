@@ -65,7 +65,8 @@ final class CompressionService {
         defer { try? fm.removeItem(at: temp) }
         let ditto = Process()
         ditto.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        ditto.arguments = ["--hfsCompression", url.path, temp.path]
+        // Without --noclone, ditto clones the file on APFS and ignores --hfsCompression.
+        ditto.arguments = ["--noclone", "--hfsCompression", url.path, temp.path]
         try ditto.run()
         ditto.waitUntilExit()
         guard ditto.terminationStatus == 0 else { return 0 }
