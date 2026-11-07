@@ -9,7 +9,14 @@ final class AppSettings {
     private let defaults = UserDefaults.standard
 
     var downloadFolder: String { didSet { defaults.set(downloadFolder, forKey: "downloadFolder") } }
-    var listenPort: Int { didSet { defaults.set(listenPort, forKey: "listenPort") } }
+    /// 1...65535, or 0 to let the system pick one.
+    var listenPort: Int {
+        didSet {
+            // Assigning inside didSet doesn't call it again.
+            listenPort = Self.validPort(listenPort)
+            defaults.set(listenPort, forKey: "listenPort")
+        }
+    }
     /// KB/s, 0 = unlimited
     var downloadLimitKB: Int { didSet { defaults.set(downloadLimitKB, forKey: "downloadLimitKB") } }
     var uploadLimitKB: Int { didSet { defaults.set(uploadLimitKB, forKey: "uploadLimitKB") } }
@@ -111,7 +118,7 @@ final class AppSettings {
             "blocklistAutoUpdate": true,
         ])
         downloadFolder = defaults.string(forKey: "downloadFolder") ?? downloads
-        listenPort = defaults.integer(forKey: "listenPort")
+        listenPort = Self.validPort(defaults.integer(forKey: "listenPort"))
         downloadLimitKB = defaults.integer(forKey: "downloadLimitKB")
         uploadLimitKB = defaults.integer(forKey: "uploadLimitKB")
         maxActiveDownloads = defaults.integer(forKey: "maxActiveDownloads")
@@ -160,6 +167,8 @@ final class AppSettings {
         tmdbKey = Keychain.get("tmdbKey")
     }
 
+    static func validPort(_ port: Int) -> Int { min(max(port, 0), 65535) }
+
     func trackers(_ rule: TrackerRule) -> [String] {
         rule == .merge ? mergeTrackers : filterTrackers
     }
@@ -198,11 +207,11 @@ final class AppSettings {
 
     var sessionSettings: KTSessionSettings {
         let s = KTSessionSettings()
-        s.listenPort = Int32(AppPaths.isTesting ? 0 : listenPort)
+        s.listenPort = Int32(clamping: AppPaths.isTesting ? 0 : Self.validPort(listenPort))
         s.downloadRateLimit = Int32(clamping: max(0, downloadLimitKB) * 1024)
         s.uploadRateLimit = Int32(clamping: max(0, uploadLimitKB) * 1024)
-        s.maxActiveDownloads = Int32(maxActiveDownloads)
-        s.maxActiveSeeds = Int32(maxActiveSeeds)
+        s.maxActiveDownloads = Int32(clamping: maxActiveDownloads)
+        s.maxActiveSeeds = Int32(clamping: maxActiveSeeds)
         s.enableDHT = enableDHT
         s.enableLSD = true
         s.enablePortMapping = enablePortMapping
