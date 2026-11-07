@@ -229,6 +229,14 @@ final class TorrentStore {
         refresh()
     }
 
+    /// Starts a transfer that is waiting in the queue, for playback that can't wait for its turn.
+    func forceStart(_ torrent: Torrent) {
+        if policy.isHolding { policy.resumeAnyway(torrent.id) }
+        let session = session, id = torrent.id
+        queue.async { session.forceStartTorrent(id) }
+        refresh()
+    }
+
     func toggle(_ torrent: Torrent) {
         if torrent.canResume {
             resume(torrent)

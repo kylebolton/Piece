@@ -127,6 +127,8 @@ NS_SWIFT_SENDABLE
 - (void)removeTorrent:(NSString *)infoHash deleteFiles:(BOOL)deleteFiles;
 - (void)pauseTorrent:(NSString *)infoHash;
 - (void)resumeTorrent:(NSString *)infoHash;
+/// Starts a transfer now even when the queue would keep it waiting: it leaves automatic queueing.
+- (void)forceStartTorrent:(NSString *)infoHash;
 - (void)recheck:(NSString *)infoHash;
 - (void)reannounceTorrent:(NSString *)infoHash;
 - (void)setSequential:(BOOL)sequential forTorrent:(NSString *)infoHash;

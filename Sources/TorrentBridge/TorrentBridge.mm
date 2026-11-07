@@ -601,6 +601,19 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     }
 }
 
+- (void)forceStartTorrent:(NSString *)infoHash {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        lt::torrent_handle h;
+        if (![self handle:h forHash:infoHash]) return;
+        [self endHoldFor:infoHash];
+        h.clear_error();
+        h.unset_flags(lt::torrent_flags::auto_managed);
+        h.resume();
+    } catch (const std::exception &) {
+    }
+}
+
 // MARK: - Hold
 
 - (void)setHoldActive:(BOOL)active exempt:(NSArray<NSString *> *)exempt {

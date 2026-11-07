@@ -167,7 +167,11 @@ final class PlayerModel {
             torrents.policy.playingHash = nil
         }
         if case .torrent(let hash, let index, _, _, let size) = newItem.origin {
-            if let torrent = torrents.torrent(hash), torrent.phase == .paused { torrents.resume(torrent) }
+            if let torrent = torrents.torrent(hash) {
+                if torrent.phase == .paused { torrents.resume(torrent) }
+                // A queued transfer never gets pieces until its turn comes; playing it can't wait for that.
+                if torrent.phase == .queued { torrents.forceStart(torrent) }
+            }
             // Containers keep their index at the start or the end; fetch both before anything else.
             server.session.prioritizeTorrent(hash, file: Int32(index), offset: 0, window: 12 * 1024 * 1024)
             server.session.prioritizeTorrent(hash, file: Int32(index), offset: max(0, size - 4 * 1024 * 1024), window: 4 * 1024 * 1024)
