@@ -13,11 +13,13 @@ struct OnlineSubtitle: Identifiable, Hashable {
 enum OpenSubtitlesError: LocalizedError {
     case missingKey
     case server(String)
+    /// 401: the key, or the login token, isn't accepted.
+    case unauthorized(String)
 
     var errorDescription: String? {
         switch self {
         case .missingKey: "Add your OpenSubtitles API key in Settings → Subtitles to search online."
-        case .server(let message): message
+        case .server(let message), .unauthorized(let message): message
         }
     }
 }
@@ -94,7 +96,8 @@ final class OpenSubtitles {
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
             let message = json["message"] as? String ?? (json["errors"] as? [String])?.first
-            throw OpenSubtitlesError.server(message ?? "OpenSubtitles returned an error (\(http.statusCode)).")
+                ?? "OpenSubtitles returned an error (\(http.statusCode))."
+            throw http.statusCode == 401 ? OpenSubtitlesError.unauthorized(message) : OpenSubtitlesError.server(message)
         }
         return json
     }
@@ -161,7 +164,15 @@ final class OpenSubtitles {
         let cached = AppPaths.subtitles.appendingPathComponent("os-\(fileID).srt")
         if FileManager.default.fileExists(atPath: cached.path) { return cached }
         await loginIfNeeded()
-        let json = try await send(try request("download", body: ["file_id": fileID]))
+        let json: [String: Any]
+        do {
+            json = try await send(try request("download", body: ["file_id": fileID]))
+        } catch OpenSubtitlesError.unauthorized where token != nil {
+            // Login tokens expire after about a day; get a fresh one and try once more.
+            token = nil
+            await loginIfNeeded()
+            json = try await send(try request("download", body: ["file_id": fileID]))
+        }
         guard let link = json["link"] as? String, let url = URL(string: link) else {
             throw OpenSubtitlesError.server(json["message"] as? String ?? "No download link was returned.")
         }
