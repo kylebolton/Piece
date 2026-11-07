@@ -22,6 +22,9 @@
 #include <libtorrent/address.hpp>
 
 #include <arpa/inet.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
 
 #include <algorithm>
 #include <atomic>
@@ -126,13 +129,32 @@ bool readFile(const std::string &path, std::vector<char> &out) {
     return true;
 }
 
-void writeFile(const std::string &path, const std::vector<char> &buf) {
+/// Replaces `path` with `buf` only once all of it is safely on disk, so a full disk or a crash
+/// mid-write leaves the previous file in place instead of a truncated one.
+bool writeFile(const std::string &path, const std::vector<char> &buf) {
     std::string tmp = path + ".tmp";
-    {
-        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        f.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+    int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return false;
+    const char *data = buf.data();
+    size_t left = buf.size();
+    bool ok = true;
+    while (left > 0) {
+        ssize_t written = ::write(fd, data, left);
+        if (written < 0) {
+            if (errno == EINTR) continue;
+            ok = false;
+            break;
+        }
+        data += written;
+        left -= static_cast<size_t>(written);
     }
-    std::rename(tmp.c_str(), path.c_str());
+    if (ok && ::fsync(fd) != 0) ok = false;
+    if (::close(fd) != 0) ok = false;
+    if (!ok || std::rename(tmp.c_str(), path.c_str()) != 0) {
+        std::remove(tmp.c_str());
+        return false;
+    }
+    return true;
 }
 
 // MARK: - Blocklists
