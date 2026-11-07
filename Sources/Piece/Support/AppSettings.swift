@@ -193,8 +193,8 @@ final class AppSettings {
     var sessionSettings: KTSessionSettings {
         let s = KTSessionSettings()
         s.listenPort = Int32(AppPaths.isTesting ? 0 : listenPort)
-        s.downloadRateLimit = Int32(downloadLimitKB * 1024)
-        s.uploadRateLimit = Int32(uploadLimitKB * 1024)
+        s.downloadRateLimit = Int32(clamping: max(0, downloadLimitKB) * 1024)
+        s.uploadRateLimit = Int32(clamping: max(0, uploadLimitKB) * 1024)
         s.maxActiveDownloads = Int32(maxActiveDownloads)
         s.maxActiveSeeds = Int32(maxActiveSeeds)
         s.enableDHT = enableDHT
