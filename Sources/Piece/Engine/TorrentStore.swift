@@ -22,6 +22,9 @@ final class TorrentStore {
     @ObservationIgnored private var tick = 0
     @ObservationIgnored private var byID: [String: Torrent] = [:]
     @ObservationIgnored private var isShutDown = false
+    /// Transfers seen downloading (or fetching metadata) during this run. libtorrent also reports "finished"
+    /// for completed torrents it restores at launch; only these ones have really just finished.
+    @ObservationIgnored private var seenIncomplete: Set<String> = []
 
     init(settings: AppSettings) {
         let state = AppPaths.directory("State").path
@@ -112,6 +115,7 @@ final class TorrentStore {
                 added = true
             }
             torrent.apply(status)
+            if status.state == .downloading || status.state == .fetchingMetadata { seenIncomplete.insert(status.infoHash) }
             if status.held, torrent.heldStatus != policy.heldStatus { torrent.heldStatus = policy.heldStatus }
             down += Int(status.downloadRate)
             up += Int(status.uploadRate)
@@ -119,6 +123,7 @@ final class TorrentStore {
         if seen.count != torrents.count {
             torrents.removeAll { !seen.contains($0.id) }
             byID = byID.filter { seen.contains($0.key) }
+            seenIncomplete.formIntersection(seen)
         }
         if added { torrents.sort { $0.dateAdded > $1.dateAdded } }
         if downloadRate != down { downloadRate = down }
@@ -131,7 +136,7 @@ final class TorrentStore {
             switch event.type {
             case .finished:
                 // libtorrent also reports "finished" when a completed torrent is restored at launch.
-                if torrent.totalDownloaded > 0 || Date().timeIntervalSince(torrent.dateAdded) < 60 {
+                if seenIncomplete.remove(event.infoHash) != nil || Date().timeIntervalSince(torrent.dateAdded) < 60 {
                     onFinished?(torrent)
                 }
             case .error:
