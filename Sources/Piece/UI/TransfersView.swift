@@ -100,7 +100,7 @@ struct TorrentRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            IconTile(symbol: symbol, tint: torrent.phase.tint, size: 32)
+            TorrentIcon(torrent: torrent, symbol: symbol)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(torrent.name)
