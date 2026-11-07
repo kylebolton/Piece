@@ -104,19 +104,7 @@ struct SubtitleSettings: View {
                         SubtitleLanguagePicker(chosen: codes) { add($0) }
                     }
             }
-        } footer: {
-            Text(languagesFooter(codes))
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
-    }
-
-    private func languagesFooter(_ codes: [String]) -> String {
-        let order = codes.count > 1 ? "First found wins; drag to reorder. " : ""
-        guard let family = codes.lazy.compactMap({ SubtitleLanguage[$0]?.family }).first.flatMap({ SubtitleLanguage[$0] }) else {
-            return order + "Variants like Portuguese (Portugal) and (Brazil) are kept apart."
-        }
-        return order + "Variants are kept apart; one labeled just “\(family.name)” comes after every exact match."
     }
 
     private func add(_ language: SubtitleLanguage) {

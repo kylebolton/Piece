@@ -9,21 +9,6 @@ struct GeneralSettings: View {
         @Bindable var settings = app.settings
         Form {
             Section {
-                LabeledContent("Save downloads to") {
-                    HStack {
-                        Text((settings.downloadFolder as NSString).abbreviatingWithTildeInPath)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .foregroundStyle(.secondary)
-                        Button("Change…") {
-                            let panel = NSOpenPanel()
-                            panel.canChooseDirectories = true
-                            panel.canChooseFiles = false
-                            panel.canCreateDirectories = true
-                            if panel.runModal() == .OK, let url = panel.url { settings.downloadFolder = url.path }
-                        }
-                    }
-                }
                 VStack(alignment: .leading, spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Toggle("Watch a folder for new torrent files", isOn: $settings.watchFolderEnabled)
@@ -66,8 +51,6 @@ struct GeneralSettings: View {
                 .animation(.default, value: settings.watchFolderEnabled)
             }
             Section {
-                Toggle("Add .part to files that aren't fully downloaded", isOn: $settings.partSuffix)
-                    .help("Unfinished files are named “name.part” on disk and get their real name once they finish. Playing them in Piece still works.")
                 Toggle("Notify me when a download finishes", isOn: $settings.notifyOnCompletion)
             }
             
@@ -86,7 +69,6 @@ struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: settings.partSuffix) { app.torrents.applySettings(app.settings) }
         .onChange(of: settings.watchFolderEnabled) { app.watchFolder.restart() }
         .onChange(of: settings.watchFolder) { app.watchFolder.restart() }
         .onChange(of: settings.watchFolderNotify) {
