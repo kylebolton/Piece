@@ -228,6 +228,23 @@ final class IntegrationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: final), good)
     }
 
+    func testAddingAnExistingTorrentMergesItsTrackers() throws {
+        let file = folder.appendingPathComponent("data/notes.txt")
+        try Data(repeating: 3, count: 200_000).write(to: file)
+        let hash = try seed(file)
+        XCTAssertTrue(session.trackers(forTorrent: hash).isEmpty)
+
+        // Same torrent, now with an announce URL ("announce" sorts before every other key).
+        var data = try XCTUnwrap(KTSession.createTorrent(forPath: file.path))
+        let announce = "udp://tracker.example.org:6969/announce"
+        data.insert(contentsOf: Data("8:announce\(announce.count):\(announce)".utf8), at: 1)
+        let again = try session.addTorrentData(data, savePath: file.deletingLastPathComponent().path)
+
+        XCTAssertEqual(again, hash)
+        XCTAssertEqual(session.statuses().count, 1)
+        XCTAssertEqual(session.trackers(forTorrent: hash).map(\.url), [announce])
+    }
+
     func testResumeDataSurvivesRestart() throws {
         let file = folder.appendingPathComponent("data/notes.txt")
         try Data(repeating: 7, count: 200_000).write(to: file)

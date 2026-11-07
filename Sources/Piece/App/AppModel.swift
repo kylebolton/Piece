@@ -51,6 +51,7 @@ final class AppModel {
     let settings = AppSettings.shared
     let torrents: TorrentStore
     let blocklist: BlocklistManager
+    let watchFolder: WatchFolder
     let library = LibraryStore()
     let tags = TagStore()
     let compression: CompressionService
@@ -72,6 +73,7 @@ final class AppModel {
     private init() {
         torrents = TorrentStore(settings: settings)
         blocklist = BlocklistManager(settings: settings, session: torrents.session)
+        watchFolder = WatchFolder(settings: settings, torrents: torrents)
         compression = CompressionService(library: library)
         server = StreamServer(session: torrents.session)
         player = PlayerModel(server: server, torrents: torrents, library: library)
@@ -84,6 +86,7 @@ final class AppModel {
         server.start()
         torrents.start()
         blocklist.start()
+        watchFolder.restart()
         startWidgetUpdates()
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(45))

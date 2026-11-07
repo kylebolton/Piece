@@ -413,6 +413,33 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     }
 }
 
+/// Adds the trackers in `atp` (a .torrent's announce list or a magnet's `tr=`) that the transfer doesn't have yet.
+- (void)mergeTrackersOf:(const lt::add_torrent_params &)atp intoTorrent:(NSString *)infoHash {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        lt::torrent_handle h;
+        if (![self handle:h forHash:infoHash]) return;
+        std::vector<lt::announce_entry> current = h.trackers();
+        std::set<std::string> have;
+        for (const lt::announce_entry &ae : current) have.insert(trackerKey(ae.url));
+        std::vector<std::string> incoming = atp.trackers;
+        if (atp.ti)
+            for (const lt::announce_entry &ae : atp.ti->trackers()) incoming.push_back(ae.url);
+        int maxTier = maxTierOf(current);
+        bool changed = false;
+        for (const std::string &url : incoming) {
+            std::string key = trackerKey(url);
+            if (key.empty() || !have.insert(key).second) continue;
+            h.add_tracker(nextTierEntry(url, maxTier));
+            changed = true;
+        }
+        // The filter list still wins over whatever the file brought along.
+        if ([self applyTrackerRulesTo:h]) changed = true;
+        if (changed) [self saveResumeDataFor:h];
+    } catch (const std::exception &) {
+    }
+}
+
 - (nullable NSString *)addParams:(lt::add_torrent_params)atp savePath:(NSString *)savePath error:(NSError **)error {
     // libtorrent throws when a handle has gone away; never let that unwind into Swift.
     try {
@@ -420,9 +447,15 @@ lt::settings_pack makePack(KTSessionSettings *s) {
         std::string hash = hashString(atp.info_hashes.has_v1() || atp.info_hashes.has_v2()
                                           ? atp.info_hashes
                                           : (atp.ti ? atp.ti->info_hashes() : atp.info_hashes));
+        bool exists;
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            if (_handles.count(hash)) return toNS(hash);
+            exists = _handles.count(hash) > 0;
+        }
+        if (exists) {
+            // Already added: keep the transfer, but pick up any trackers the new torrent file or link knows.
+            [self mergeTrackersOf:atp intoTorrent:toNS(hash)];
+            return toNS(hash);
         }
         lt::error_code ec;
         lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);

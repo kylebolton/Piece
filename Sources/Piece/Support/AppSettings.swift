@@ -27,6 +27,14 @@ final class AppSettings {
     var autoPackAfterDays: Int { didSet { defaults.set(autoPackAfterDays, forKey: "autoPackAfterDays") } }
     /// Unfinished files are named `name.part` on disk until they finish downloading.
     var partSuffix: Bool { didSet { defaults.set(partSuffix, forKey: "partSuffix") } }
+    /// Torrent files that show up in this folder are added automatically.
+    var watchFolderEnabled: Bool { didSet { defaults.set(watchFolderEnabled, forKey: "watchFolderEnabled") } }
+    var watchFolder: String { didSet { defaults.set(watchFolder, forKey: "watchFolder") } }
+    var watchFolderAction: WatchFolderAction {
+        didSet { defaults.set(watchFolderAction.rawValue, forKey: "watchFolderAction") }
+    }
+    /// Post a notification when the watched folder adds torrents.
+    var watchFolderNotify: Bool { didSet { defaults.set(watchFolderNotify, forKey: "watchFolderNotify") } }
     var hideAdultResults: Bool { didSet { defaults.set(hideAdultResults, forKey: "hideAdultResults") } }
     var showMenuBarItem: Bool { didSet { defaults.set(showMenuBarItem, forKey: "showMenuBarItem") } }
 
@@ -58,6 +66,7 @@ final class AppSettings {
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].path
         defaults.register(defaults: [
             "downloadFolder": downloads,
+            "watchFolder": downloads,
             "listenPort": 6881,
             "maxActiveDownloads": 5,
             "maxActiveSeeds": 5,
@@ -88,6 +97,10 @@ final class AppSettings {
         autoPackAfterDays = defaults.integer(forKey: "autoPackAfterDays")
         hideAdultResults = defaults.bool(forKey: "hideAdultResults")
         partSuffix = defaults.bool(forKey: "partSuffix")
+        watchFolderEnabled = defaults.bool(forKey: "watchFolderEnabled")
+        watchFolder = defaults.string(forKey: "watchFolder") ?? downloads
+        watchFolderNotify = defaults.bool(forKey: "watchFolderNotify")
+        watchFolderAction = WatchFolderAction(rawValue: defaults.string(forKey: "watchFolderAction") ?? "") ?? .keep
         subtitleLanguages = defaults.stringArray(forKey: "subtitleLanguages") ?? ["en"]
         autoLoadSubtitles = defaults.bool(forKey: "autoLoadSubtitles")
         subtitleFontScale = defaults.double(forKey: "subtitleFontScale")

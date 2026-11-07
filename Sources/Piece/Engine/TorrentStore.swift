@@ -143,14 +143,14 @@ final class TorrentStore {
     }
 
     @discardableResult
-    func add(torrentData: Data, savePath: String? = nil) -> String? {
+    func add(torrentData: Data, savePath: String? = nil, reportErrors: Bool = true) -> String? {
         let path = savePath ?? AppSettings.shared.downloadFolder
         do {
             let hash = try session.addTorrentData(torrentData, savePath: path)
             refresh()
             return hash
         } catch {
-            lastError = error.localizedDescription
+            if reportErrors { lastError = error.localizedDescription }
             return nil
         }
     }
