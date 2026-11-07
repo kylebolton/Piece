@@ -63,10 +63,22 @@ final class PlayerModel {
     private(set) var subtitleTracks: [SubtitleTrack] = []
     private(set) var selectedSubtitleID: String?
     private(set) var cueText: String?
-    private(set) var subtitleStatus: String?
+    /// The track being fetched or parsed right now; the previous subtitles stay on screen until it's ready.
+    private(set) var loadingSubtitleID: String?
+    /// Why a track couldn't be loaded, by track id.
+    private(set) var subtitleFailures: [String: String] = [:]
     private(set) var onlineResults: [OnlineSubtitle] = []
-    private(set) var isSearchingOnline = false
+    private(set) var onlineSearch: OnlineSearchState = .idle
+    var isSearchingOnline: Bool { onlineSearch == .searching }
     var subtitleDelay: Double = 0
+
+    enum OnlineSearchState: Equatable {
+        case idle
+        case searching
+        /// Finished; `query` is the title that was searched for.
+        case finished(query: String)
+        case failed(String)
+    }
 
     private(set) var audioStreams: [MediaProbe.Stream] = []
     private(set) var selectedAudioStream: Int?
@@ -80,6 +92,8 @@ final class PlayerModel {
     @ObservationIgnored private var probe: MediaProbe?
     @ObservationIgnored private var cues: [SubtitleCue] = []
     @ObservationIgnored private var generation = 0
+    /// Identifies the latest online search, so a slow earlier one can't overwrite its results.
+    @ObservationIgnored private var searchToken = 0
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private var itemObservation: NSKeyValueObservation?
     @ObservationIgnored private var timeObserver: Any?
@@ -173,8 +187,11 @@ final class PlayerModel {
         cueText = nil
         subtitleTracks = []
         selectedSubtitleID = nil
-        subtitleStatus = nil
+        loadingSubtitleID = nil
+        subtitleFailures = [:]
         onlineResults = []
+        onlineSearch = .idle
+        searchToken += 1
         audioStreams = []
         selectedAudioStream = nil
         subtitleDelay = 0
@@ -550,24 +567,29 @@ final class PlayerModel {
         let generation = generation
         guard let track else {
             selectedSubtitleID = nil
+            loadingSubtitleID = nil
             cues = []
             cueText = nil
-            subtitleStatus = nil
             if mode == .hls(withSubtitles: true) { reopen(forceHLS: false, withSubtitles: false) }
             return
         }
-        selectedSubtitleID = track.id
-        subtitleStatus = "Loading subtitles…"
+        loadingSubtitleID = track.id
+        subtitleFailures[track.id] = nil
         do {
             let loaded = try await loadCues(for: track)
-            guard generation == self.generation, selectedSubtitleID == track.id else { return }
+            guard generation == self.generation, loadingSubtitleID == track.id else { return }
+            loadingSubtitleID = nil
+            guard !loaded.isEmpty else {
+                subtitleFailures[track.id] = "That subtitle file is empty."
+                return
+            }
+            selectedSubtitleID = track.id
             cues = loaded
-            subtitleStatus = loaded.isEmpty ? "That subtitle file is empty." : nil
-            if isExternal, !loaded.isEmpty { reopen(forceHLS: true, withSubtitles: true) }
+            if isExternal { reopen(forceHLS: true, withSubtitles: true) }
         } catch {
-            guard generation == self.generation else { return }
-            cues = []
-            subtitleStatus = error.localizedDescription
+            guard generation == self.generation, loadingSubtitleID == track.id else { return }
+            loadingSubtitleID = nil
+            subtitleFailures[track.id] = error.localizedDescription
         }
     }
 
@@ -623,8 +645,10 @@ final class PlayerModel {
     func searchOnline(autoSelect: Bool = false, query customQuery: String? = nil) async {
         guard let item else { return }
         let generation = generation
-        isSearchingOnline = true
-        defer { isSearchingOnline = false }
+        searchToken += 1
+        let token = searchToken
+        onlineResults = []
+        onlineSearch = .searching
 
         var parsed = ReleaseNameParser.parse((item.absolutePath as NSString).lastPathComponent)
         if let id = item.libraryID, let saved = library.item(id), saved.isMatched {
@@ -633,18 +657,26 @@ final class PlayerModel {
             parsed.episode = saved.episode ?? parsed.episode
             parsed.year = saved.year ?? parsed.year
         }
+        let query = customQuery ?? parsed.title
+        let isFileMatch = customQuery == nil
+        let hash = isFileMatch ? movieHash() : nil
+        let languages = AppSettings.shared.subtitleLanguages
         do {
-            let results = try await OpenSubtitles.shared.search(
-                query: customQuery ?? parsed.title, movieHash: customQuery == nil ? movieHash() : nil,
-                season: customQuery == nil ? parsed.season : nil, episode: customQuery == nil ? parsed.episode : nil,
-                year: customQuery == nil ? parsed.year : nil, languages: AppSettings.shared.subtitleLanguages)
-            guard generation == self.generation else { return }
+            var results = try await OpenSubtitles.shared.search(
+                query: query, movieHash: hash, season: isFileMatch ? parsed.season : nil,
+                episode: isFileMatch ? parsed.episode : nil, year: isFileMatch ? parsed.year : nil, languages: languages)
+            // A wrong year in the file name shouldn't hide every result.
+            if results.isEmpty, isFileMatch, parsed.year != nil, parsed.season == nil {
+                results = try await OpenSubtitles.shared.search(
+                    query: query, movieHash: hash, season: nil, episode: nil, year: nil, languages: languages)
+            }
+            guard generation == self.generation, token == searchToken else { return }
             onlineResults = results
-            if !autoSelect { subtitleStatus = results.isEmpty ? "No subtitles found online." : nil }
+            onlineSearch = .finished(query: query)
             if autoSelect, let best = results.first { await select(online: best) }
         } catch {
-            guard generation == self.generation else { return }
-            if !autoSelect { subtitleStatus = error.localizedDescription }
+            guard generation == self.generation, token == searchToken else { return }
+            onlineSearch = .failed(error.localizedDescription)
         }
     }
 

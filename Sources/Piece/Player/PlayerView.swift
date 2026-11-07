@@ -320,69 +320,28 @@ struct SubtitlePanel: View {
             Text("Subtitles").font(.headline)
 
             VStack(alignment: .leading, spacing: 2) {
-                trackButton(title: "Off", isSelected: model.selectedSubtitleID == nil) {
+                trackButton(title: "Off", isSelected: model.selectedSubtitleID == nil && model.loadingSubtitleID == nil) {
                     Task { await model.select(subtitle: nil) }
                 }
                 ForEach(model.subtitleTracks) { track in
-                    trackButton(title: track.menuTitle, isSelected: model.selectedSubtitleID == track.id) {
+                    trackButton(title: track.menuTitle, id: track.id, model: model) {
                         Task { await model.select(subtitle: track) }
                     }
                 }
             }
 
-            if let status = model.subtitleStatus {
-                Label(status, systemImage: status.hasSuffix("…") ? "hourglass" : "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             Divider()
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Find online").font(.subheadline.weight(.semibold))
                 HStack {
                     TextField("Title (leave empty to match this file)", text: $query)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { search(model) }
-                    if model.isSearchingOnline {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Button("Search") { search(model) }
-                    }
+                    Button("Search") { search(model) }
+                        .disabled(model.isSearchingOnline)
                 }
-                if !model.onlineResults.isEmpty {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(model.onlineResults.prefix(30)) { result in
-                                Button {
-                                    Task { await model.select(online: result) }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Text(SubtitleLanguage.badge(for: result.language))
-                                            .font(.caption2.weight(.bold))
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 1)
-                                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
-                                            .help(SubtitleLanguage.name(for: result.language) ?? result.language)
-                                        Text(result.release).font(.caption).lineLimit(1).truncationMode(.middle)
-                                        Spacer(minLength: 4)
-                                        if result.hashMatch {
-                                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.green).help("Exact match for this file")
-                                        }
-                                        if model.selectedSubtitleID == "online:\(result.fileID)" {
-                                            Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
-                                        }
-                                    }
-                                    .padding(.vertical, 3)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 150)
-                }
+                onlineResults(model)
             }
 
             Divider()
@@ -413,16 +372,149 @@ struct SubtitlePanel: View {
         Task { await model.searchOnline(query: text.isEmpty ? nil : text) }
     }
 
-    private func trackButton(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack {
-                Image(systemName: "checkmark").opacity(isSelected ? 1 : 0).foregroundStyle(Color.accentColor)
-                Text(title).lineLimit(1).truncationMode(.middle)
-                Spacer()
+    /// What the online search is doing: a spinner while it runs, then the matches, or why there are none.
+    @ViewBuilder
+    private func onlineResults(_ model: PlayerModel) -> some View {
+        switch model.onlineSearch {
+        case .idle:
+            EmptyView()
+
+        case .searching:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Searching OpenSubtitles…")
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 44)
+
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 6) {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Try Again") { search(model) }
+            }
+
+        case .finished(let searched):
+            if model.onlineResults.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(searched.isEmpty ? "No subtitles found." : "No subtitles found for “\(searched)”.",
+                          systemImage: "magnifyingglass")
+                        .font(.callout)
+                    Text("Only \(preferredLanguageNames) are searched. Try another spelling, or change the languages in Settings → Subtitles.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                let shown = model.onlineResults.prefix(30)
+                Text(model.onlineResults.count > shown.count
+                     ? "Showing \(shown.count) of \(model.onlineResults.count)" : "\(shown.count) found")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(shown) { result in
+                            onlineRow(result, model: model)
+                        }
+                    }
+                }
+                .frame(
+                    minHeight: 120,
+                    maxHeight: 170
+                )
+            }
+        }
+    }
+
+    private func onlineRow(_ result: OnlineSubtitle, model: PlayerModel) -> some View {
+        let id = "online:\(result.fileID)"
+        let isLoading = model.loadingSubtitleID == id
+        let failure = model.subtitleFailures[id]
+        return Button {
+            Task { await model.select(online: result) }
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(SubtitleLanguage.badge(for: result.language))
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
+                        .help(SubtitleLanguage.name(for: result.language) ?? result.language)
+                    Text(result.release).font(.caption).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    if isLoading {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        if result.hearingImpaired {
+                            Image(systemName: "ear").foregroundStyle(.secondary).help("For the deaf and hard of hearing")
+                        }
+                        if result.hashMatch {
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.green).help("Exact match for this file")
+                        }
+                        if failure != nil {
+                            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+                        } else if model.selectedSubtitleID == id {
+                            Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                        }
+                    }
+                }
+                if isLoading {
+                    Text("Downloading…").font(.caption2).foregroundStyle(.secondary)
+                } else if let failure {
+                    Text(failure).font(.caption2).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(isLoading)
+    }
+
+    private var preferredLanguageNames: String {
+        let names = AppSettings.shared.subtitleLanguages.compactMap { SubtitleLanguage[$0]?.name }
+        return names.isEmpty ? "your preferred languages" : names.formatted(.list(type: .and))
+    }
+
+    /// A track in the picker: a spinner while it loads, a checkmark when active, a warning if it failed.
+    private func trackButton(title: String, id: String, model: PlayerModel, action: @escaping () -> Void) -> some View {
+        let isLoading = model.loadingSubtitleID == id
+        let failure = model.subtitleFailures[id]
+        return trackButton(title: title, isSelected: model.selectedSubtitleID == id, isLoading: isLoading, failure: failure,
+                           action: action)
+    }
+
+    private func trackButton(title: String, isSelected: Bool, isLoading: Bool = false, failure: String? = nil,
+                             action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    ZStack {
+                        Image(systemName: failure == nil ? "checkmark" : "exclamationmark.circle.fill")
+                            .opacity(isSelected || failure != nil ? 1 : 0)
+                            .foregroundStyle(failure == nil ? Color.accentColor : .orange)
+                            .opacity(isLoading ? 0 : 1)
+                        if isLoading { ProgressView().controlSize(.mini) }
+                    }
+                    .frame(width: 16)
+                    Text(title).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                }
+                if isLoading {
+                    Text("Loading…").font(.caption2).foregroundStyle(.secondary).padding(.leading, 20)
+                } else if let failure {
+                    Text(failure).font(.caption2).foregroundStyle(.orange).padding(.leading, 20)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoading)
     }
 }

@@ -293,6 +293,12 @@ final class SubtitleTests: XCTestCase {
         head[15] = 0x80      // adds 0x80 << 56 in the second word
         XCTAssertEqual(OpenSubtitles.hash(size: 131_072, head: head, tail: zeros), "8000000000020001")
     }
+
+    func testSearchQueryEscapesReservedCharacters() {
+        // "&" and "+" would otherwise end the title early; keys are sorted and values lowercased.
+        XCTAssertEqual(OpenSubtitles.queryString(["query": "Law & Order+SVU", "languages": "en,pt-pt"]),
+                       "languages=en,pt-pt&query=law%20%26%20order%2Bsvu")
+    }
 }
 
 final class StreamingUnitTests: XCTestCase {

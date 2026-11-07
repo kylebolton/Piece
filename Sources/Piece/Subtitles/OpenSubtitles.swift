@@ -57,16 +57,26 @@ final class OpenSubtitles {
         return hash(size: size, head: head, tail: tail)
     }
 
+    /// The API redirects unless parameters are lowercase and alphabetically sorted. Values are escaped by hand
+    /// because URLQueryItem leaves "&", "+" and "=" alone, which cuts a title like "Law & Order" short.
+    static func queryString(_ query: [String: String]) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=#")
+        return query.sorted { $0.key < $1.key }.map {
+            $0.key + "=" + ($0.value.lowercased().addingPercentEncoding(withAllowedCharacters: allowed) ?? "")
+        }.joined(separator: "&")
+    }
+
     private func request(_ path: String, query: [String: String] = [:], body: [String: Any]? = nil) throws -> URLRequest {
         let own = AppSettings.shared.openSubtitlesKey.trimmingCharacters(in: .whitespaces)
         let key = own.isEmpty ? BuiltInKeys.openSubtitles : own
         guard !key.isEmpty else { throw OpenSubtitlesError.missingKey }
         var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty {
-            // The API redirects unless parameters are lowercase and alphabetically sorted.
-            components.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value.lowercased()) }
+            components.percentEncodedQuery = Self.queryString(query)
         }
         var request = URLRequest(url: components.url!)
+        request.timeoutInterval = 20
         request.setValue(key, forHTTPHeaderField: "Api-Key")
         request.setValue("Piece v1.0.0", forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -155,7 +165,11 @@ final class OpenSubtitles {
         guard let link = json["link"] as? String, let url = URL(string: link) else {
             throw OpenSubtitlesError.server(json["message"] as? String ?? "No download link was returned.")
         }
-        let (data, _) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await URLSession.shared.data(from: url)
+        if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+            throw OpenSubtitlesError.server("The subtitle file couldn't be downloaded (\(http.statusCode)).")
+        }
+        guard !data.isEmpty else { throw OpenSubtitlesError.server("The subtitle file was empty.") }
         try data.write(to: cached, options: .atomic)
         return cached
     }
