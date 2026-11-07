@@ -46,10 +46,11 @@ final class BlocklistTests: XCTestCase {
         # a comment
         Some Org:1.2.3.4-1.2.3.9
         Name: with colons:10.0.0.0-10.0.0.255
+        China Internet Network Information Center, CNNIC:1.2.0.0-1.2.255.255
 
         not a rule at all
         """)
-        XCTAssertEqual(session.loadBlocklist(atPath: list.path), 2)
+        XCTAssertEqual(session.loadBlocklist(atPath: list.path), 3)
     }
 
     func testParsesEMuleDatAndSkipsAllowedRanges() throws {

@@ -246,10 +246,10 @@ bool parseBlocklistLine(const std::string &raw, lt::address &first, lt::address 
     std::string line = trimmed(raw);
     if (line.empty() || line[0] == '#' || line[0] == ';' || line.compare(0, 2, "//") == 0) return NO;
 
-    // eMule .dat: the access level follows the range, and 128 or more means "allowed".
+    // eMule .dat: the access level follows the range, and 128 or more means "allowed". Only when the
+    // part before the comma is a range: PeerGuardian names often contain commas ("Foo, Inc:1.2.3.4-…").
     size_t comma = line.find(',');
-    if (comma != std::string::npos) {
-        if (!parseRange(line.substr(0, comma), first, last)) return NO;
+    if (comma != std::string::npos && parseRange(line.substr(0, comma), first, last)) {
         size_t next = line.find(',', comma + 1);
         std::string level = trimmed(line.substr(comma + 1, next == std::string::npos ? std::string::npos : next - comma - 1));
         if (!level.empty() && std::all_of(level.begin(), level.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); })
