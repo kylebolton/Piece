@@ -126,6 +126,9 @@ final class JackettManager {
 
     private func bringUp() async throws {
         do {
+            // A Jackett left over from a crash or force quit still answers on the port, but this run has no handle
+            // to stop it at quit and it may be an older version. Replace it with one this run owns.
+            if process == nil { await Self.stopLeftovers(of: binary) }
             if !(await isResponding()) {
                 if !FileManager.default.isExecutableFile(atPath: binary.path) || installedVersion != Self.version {
                     try await install()
@@ -222,6 +225,34 @@ final class JackettManager {
         }
         try process.run()
         self.process = process
+    }
+
+    /// Asks any running copy of `binary` (one this app started in an earlier run) to quit, and kills it if it hasn't
+    /// after a few seconds. Jackett installed some other way runs from a different path and is left alone.
+    nonisolated static func stopLeftovers(of binary: URL) async {
+        let pids = runningPIDs(of: binary)
+        guard !pids.isEmpty else { return }
+        pids.forEach { kill($0, SIGTERM) }
+        for _ in 0..<20 {
+            if !pids.contains(where: { kill($0, 0) == 0 }) { return }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        pids.forEach { kill($0, SIGKILL) }
+        try? await Task.sleep(for: .milliseconds(250))
+    }
+
+    nonisolated static func runningPIDs(of binary: URL) -> [pid_t] {
+        let target = binary.resolvingSymlinksInPath().path
+        let capacity = proc_listallpids(nil, 0) + 64
+        guard capacity > 64 else { return [] }
+        var pids = [pid_t](repeating: 0, count: Int(capacity))
+        let count = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
+        guard count > 0 else { return [] }
+        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        return pids.prefix(Int(count)).filter { pid in
+            guard pid > 0, pid != getpid(), proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return false }
+            return URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath().path == target
+        }
     }
 
     private func waitUntilResponding() async throws {
