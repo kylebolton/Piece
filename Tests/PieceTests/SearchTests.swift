@@ -198,6 +198,8 @@ final class SearchTests: XCTestCase {
         ]
         XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(minSeeds: 5)).count, 1)
         XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(size: .huge)).map(\.title), ["Film 2160p"])
+        XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(qualities: [.fullHD, .uhd])).count, 3)
+        XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(qualities: [.fullHD, .hdr])).count, 0)
         XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter(qualities: [.fullHD])).count, 2)
         XCTAssertEqual(SearchRefine.filter(results, with: SearchFilter()).count, 3)
     }
