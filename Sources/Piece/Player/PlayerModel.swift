@@ -100,6 +100,9 @@ final class PlayerModel {
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var statusTask: Task<Void, Never>?
     @ObservationIgnored private var lastSavedPosition: Double = 0
+    /// Where in the film the current stream starts. Converted streams are started at the resume or seek
+    /// position rather than converting everything before it, so the player's own clock runs behind by this much.
+    @ObservationIgnored private var timeOffset: Double = 0
     @ObservationIgnored private var openSerial = 0
     @ObservationIgnored private var activity: NSObjectProtocol?
     @ObservationIgnored private var resumeToastTask: Task<Void, Never>?
@@ -128,9 +131,17 @@ final class PlayerModel {
     }
 
     var selectedSubtitle: SubtitleTrack? { subtitleTracks.first { $0.id == selectedSubtitleID } }
+    /// Position in the film, whichever point the stream started from.
     var currentTime: Double {
         let t = player.currentTime().seconds
-        return t.isFinite ? t : 0
+        return (t.isFinite ? t : 0) + timeOffset
+    }
+
+    /// Length of the film when known, from the stream or from ffprobe.
+    private var mediaDuration: Double {
+        let streamed = player.currentItem?.duration.seconds ?? 0
+        if streamed.isFinite, streamed > 0 { return streamed + timeOffset }
+        return probe?.duration ?? 0
     }
 
     // MARK: - Starting and stopping
@@ -207,6 +218,7 @@ final class PlayerModel {
         selectedAudioStream = nil
         subtitleDelay = 0
         isConverting = false
+        timeOffset = 0
         isBuffering = false
         isPlaying = false
         notice = nil
@@ -219,10 +231,12 @@ final class PlayerModel {
 
     func skip(by seconds: Double) {
         guard item != nil, status == .ready else { return }
-        let duration = player.currentItem?.duration.seconds ?? 0
+        let duration = mediaDuration
         var target = max(0, currentTime + seconds)
         if duration.isFinite, duration > 0 { target = min(target, max(0, duration - 1)) }
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero,
+        // Before the start of a converted stream: convert again from there.
+        if target < timeOffset { return reopen(at: target, forceHLS: true, withSubtitles: mode == .hls(withSubtitles: true)) }
+        player.seek(to: CMTime(seconds: target - timeOffset, preferredTimescale: 600), toleranceBefore: .zero,
                     toleranceAfter: CMTime(seconds: 0.5, preferredTimescale: 600))
     }
 
@@ -245,6 +259,7 @@ final class PlayerModel {
 
     func startOver() {
         resumedFrom = nil
+        if timeOffset > 0 { return reopen(at: 0, forceHLS: true, withSubtitles: mode == .hls(withSubtitles: true)) }
         player.seek(to: .zero)
     }
 
@@ -335,10 +350,15 @@ final class PlayerModel {
             let subtitles = wantsSubtitles
                 ? (name: selectedSubtitle?.menuTitle ?? "Subtitles", language: selectedSubtitle?.languageTag, cues: shiftedCues())
                 : nil
-            guard session.start(input: toolInput, probe: probe, audioStream: selectedAudioStream, subtitles: subtitles) else {
+            // Start converting at the position itself, so a resume deep into the film doesn't wait for
+            // everything before it to be converted (or, mid-download, to arrive).
+            let start = position > 1 ? position : 0
+            guard session.start(input: toolInput, probe: probe, audioStream: selectedAudioStream, startTime: start,
+                                subtitles: subtitles) else {
                 status = .failed("The video converter (ffmpeg) isn't available.")
                 return
             }
+            timeOffset = start
             hls = session
             mode = .hls(withSubtitles: wantsSubtitles)
             isConverting = true
@@ -346,6 +366,7 @@ final class PlayerModel {
         } else {
             mode = .direct
             isConverting = false
+            timeOffset = 0
             if case .torrent(let hash, let index, let relativePath, _, _) = item.origin, !isFileComplete {
                 status = .preparing("Waiting for the first pieces…")
                 url = server.torrentFileURL(hash: hash, fileIndex: index, name: (relativePath as NSString).lastPathComponent)
@@ -384,7 +405,7 @@ final class PlayerModel {
         }
         player.replaceCurrentItem(with: playerItem)
         player.play()
-        if position > 1 { await seek(to: position, in: playerItem, generation: generation) }
+        if position > 1, timeOffset == 0 { await seek(to: position, in: playerItem, generation: generation) }
     }
 
     /// Converted streams grow as ffmpeg works, so a resume position may not exist yet.
@@ -404,14 +425,18 @@ final class PlayerModel {
     }
 
     private func reopen(forceHLS: Bool, withSubtitles: Bool) {
-        let position = currentTime
+        reopen(at: currentTime, forceHLS: forceHLS, withSubtitles: withSubtitles)
+    }
+
+    private func reopen(at position: Double, forceHLS: Bool, withSubtitles: Bool) {
         Task { await open(at: position, forceHLS: forceHLS, withSubtitles: withSubtitles) }
     }
 
     // MARK: - Progress
 
-    private func tick(_ time: Double) {
-        guard time.isFinite else { return }
+    private func tick(_ streamTime: Double) {
+        guard streamTime.isFinite else { return }
+        let time = streamTime + timeOffset
         let text = cues.isEmpty ? nil : SubtitleParser.cue(at: time - subtitleDelay, in: cues)?.text
         if text != cueText { cueText = text }
         if abs(time - lastSavedPosition) > 5 { savePosition(force: false) }
@@ -422,7 +447,7 @@ final class PlayerModel {
         let time = currentTime
         guard time > 0 else { return }
         lastSavedPosition = time
-        let duration = player.currentItem?.duration.seconds ?? 0
+        let duration = mediaDuration
         library.update(id) {
             $0.playPosition = time
             $0.lastPlayed = Date()
