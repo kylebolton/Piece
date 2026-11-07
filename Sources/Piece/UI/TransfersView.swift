@@ -260,12 +260,7 @@ struct AddTorrentSheet: View {
         isAdding = true
         Task {
             for entry in links {
-                let text = entry.trimmingCharacters(in: .whitespaces)
-                if text.lowercased().hasPrefix("magnet:") {
-                    app.torrents.add(magnet: text, savePath: folder)
-                } else {
-                    _ = await app.torrents.add(link: text)
-                }
+                _ = await app.torrents.add(link: entry, savePath: folder)
             }
             app.selection = .transfers(.all)
             dismiss()

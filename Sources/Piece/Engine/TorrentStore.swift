@@ -185,11 +185,11 @@ final class TorrentStore {
     }
 
     /// Accepts a magnet link, an http(s) link to a .torrent file, or a bare info-hash.
-    func add(link: String) async -> String? {
+    func add(link: String, savePath: String? = nil) async -> String? {
         let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.lowercased().hasPrefix("magnet:") { return add(magnet: text) }
+        if text.lowercased().hasPrefix("magnet:") { return add(magnet: text, savePath: savePath) }
         if text.range(of: "^[0-9a-fA-F]{40}$", options: .regularExpression) != nil {
-            return add(magnet: "magnet:?xt=urn:btih:\(text)")
+            return add(magnet: "magnet:?xt=urn:btih:\(text)", savePath: savePath)
         }
         guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), scheme.hasPrefix("http") else {
             lastError = "That doesn't look like a magnet link or torrent URL."
@@ -200,12 +200,12 @@ final class TorrentStore {
             request.setValue(HTTP.userAgent, forHTTPHeaderField: "User-Agent")
             let redirectGuard = MagnetRedirectGuard()
             let (data, _) = try await URLSession.shared.data(for: request, delegate: redirectGuard)
-            if let magnet = redirectGuard.magnet { return add(magnet: magnet) }
+            if let magnet = redirectGuard.magnet { return add(magnet: magnet, savePath: savePath) }
             if let text = String(data: data.prefix(4096), encoding: .utf8),
                let magnet = text.firstMatch(of: /magnet:\?xt=urn:bt[a-z0-9]+:[^"'<\s]+/) {
-                return add(magnet: String(magnet.0))
+                return add(magnet: String(magnet.0), savePath: savePath)
             }
-            return add(torrentData: data)
+            return add(torrentData: data, savePath: savePath)
         } catch {
             lastError = "Couldn't download the torrent: \(error.localizedDescription)"
             return nil
