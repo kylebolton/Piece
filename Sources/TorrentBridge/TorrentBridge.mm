@@ -18,13 +18,25 @@
 #include <libtorrent/announce_entry.hpp>
 #include <libtorrent/fingerprint.hpp>
 #include <libtorrent/error_code.hpp>
+#include <libtorrent/ip_filter.hpp>
+#include <libtorrent/address.hpp>
 
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
+
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -66,22 +78,48 @@ NSString *toNS(const std::string &s) {
     return r ?: @"";
 }
 
-std::string hashString(const lt::torrent_handle &h) {
+/// The id a torrent is known by: its v1 info-hash when it has one, else its (truncated) v2 hash.
+/// `get_best()` alone isn't stable: a hybrid torrent added from a v1 magnet learns its v2 hash with
+/// the metadata, and would change id half-way through.
+std::string hashString(const lt::info_hash_t &ih) {
     std::stringstream ss;
-    ss << h.info_hashes().get_best();
+    if (ih.has_v1()) ss << ih.v1;
+    else ss << ih.get_best();
     return ss.str();
 }
 
-std::string hashString(const lt::info_hash_t &ih) {
-    std::stringstream ss;
-    ss << ih.get_best();
-    return ss.str();
+std::string hashString(const lt::torrent_handle &h) {
+    return hashString(h.info_hashes());
 }
 
 NSError *makeError(const std::string &message) {
     return [NSError errorWithDomain:KTErrorDomain
                                code:1
                            userInfo:@{NSLocalizedDescriptionKey : toNS(message)}];
+}
+
+/// Two addresses that differ only in case, surrounding spaces or a trailing slash are the same tracker.
+std::string trackerKey(const std::string &url) {
+    std::size_t start = 0, end = url.size();
+    while (start < end && std::isspace(static_cast<unsigned char>(url[start]))) ++start;
+    while (end > start && (std::isspace(static_cast<unsigned char>(url[end - 1])) || url[end - 1] == '/')) --end;
+    std::string key = url.substr(start, end - start);
+    std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return std::tolower(c); });
+    return key;
+}
+
+/// Each added tracker gets its own tier after the existing ones, so it never displaces them.
+lt::announce_entry nextTierEntry(const std::string &url, int &maxTier) {
+    lt::announce_entry entry(url);
+    maxTier = std::min(maxTier + 1, 255);
+    entry.tier = static_cast<std::uint8_t>(maxTier);
+    return entry;
+}
+
+int maxTierOf(const std::vector<lt::announce_entry> &trackers) {
+    int tier = -1;
+    for (const lt::announce_entry &ae : trackers) tier = std::max(tier, static_cast<int>(ae.tier));
+    return tier;
 }
 
 bool readFile(const std::string &path, std::vector<char> &out) {
@@ -91,19 +129,149 @@ bool readFile(const std::string &path, std::vector<char> &out) {
     return true;
 }
 
-void writeFile(const std::string &path, const std::vector<char> &buf) {
+/// Replaces `path` with `buf` only once all of it is safely on disk, so a full disk or a crash
+/// mid-write leaves the previous file in place instead of a truncated one.
+bool writeFile(const std::string &path, const std::vector<char> &buf) {
     std::string tmp = path + ".tmp";
-    {
-        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        f.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+    int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return false;
+    const char *data = buf.data();
+    size_t left = buf.size();
+    bool ok = true;
+    while (left > 0) {
+        ssize_t written = ::write(fd, data, left);
+        if (written < 0) {
+            if (errno == EINTR) continue;
+            ok = false;
+            break;
+        }
+        data += written;
+        left -= static_cast<size_t>(written);
     }
-    std::rename(tmp.c_str(), path.c_str());
+    if (ok && ::fsync(fd) != 0) ok = false;
+    if (::close(fd) != 0) ok = false;
+    if (!ok || std::rename(tmp.c_str(), path.c_str()) != 0) {
+        std::remove(tmp.c_str());
+        return false;
+    }
+    return true;
+}
+
+// MARK: - Blocklists
+
+std::string trimmed(const std::string &s) {
+    size_t a = 0, b = s.size();
+    while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
+    while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
+    return s.substr(a, b - a);
+}
+
+/// Parses an IPv4 or IPv6 address. IPv4 octets may carry leading zeros ("001.002.003.004"),
+/// which eMule .dat lists use and inet_pton rejects.
+bool parseAddress(const std::string &text, lt::address &out) {
+    std::string s = trimmed(text);
+    if (s.empty()) return false;
+    if (s.find(':') != std::string::npos) {
+        in6_addr a6;
+        if (inet_pton(AF_INET6, s.c_str(), &a6) != 1) return false;
+        lt::address_v6::bytes_type bytes;
+        std::copy(std::begin(a6.s6_addr), std::end(a6.s6_addr), bytes.begin());
+        out = lt::address_v6(bytes);
+        return true;
+    }
+    unsigned octets[4];
+    size_t pos = 0;
+    for (int i = 0; i < 4; ++i) {
+        size_t start = pos;
+        unsigned v = 0;
+        while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
+            v = v * 10 + static_cast<unsigned>(s[pos] - '0');
+            if (v > 255) return false;
+            ++pos;
+        }
+        if (pos == start) return false;
+        octets[i] = v;
+        if (i < 3) {
+            if (pos >= s.size() || s[pos] != '.') return false;
+            ++pos;
+        }
+    }
+    if (pos != s.size()) return false;
+    out = lt::address_v4({{static_cast<unsigned char>(octets[0]), static_cast<unsigned char>(octets[1]),
+                           static_cast<unsigned char>(octets[2]), static_cast<unsigned char>(octets[3])}});
+    return true;
+}
+
+bool parseRange(const std::string &text, lt::address &first, lt::address &last) {
+    size_t dash = text.find('-');
+    if (dash == std::string::npos) return false;
+    return parseAddress(text.substr(0, dash), first) && parseAddress(text.substr(dash + 1), last);
+}
+
+bool parseCIDR(const std::string &text, lt::address &first, lt::address &last) {
+    size_t slash = text.find('/');
+    if (slash == std::string::npos) return false;
+    lt::address base;
+    if (!parseAddress(text.substr(0, slash), base)) return false;
+    std::string bitsText = trimmed(text.substr(slash + 1));
+    if (bitsText.empty() || bitsText.size() > 3) return false;
+    for (char c : bitsText) if (!std::isdigit(static_cast<unsigned char>(c))) return false;
+    int bits = std::stoi(bitsText);
+    if (base.is_v4()) {
+        if (bits > 32) return false;
+        uint32_t ip = base.to_v4().to_uint();
+        uint32_t mask = bits == 0 ? 0 : ~uint32_t(0) << (32 - bits);
+        first = lt::address_v4(ip & mask);
+        last = lt::address_v4(ip | ~mask);
+    } else {
+        if (bits > 128) return false;
+        auto lo = base.to_v6().to_bytes();
+        auto hi = lo;
+        for (int i = 0; i < 16; ++i) {
+            int keep = std::max(0, std::min(8, bits - i * 8));
+            unsigned char mask = static_cast<unsigned char>(0xFF << (8 - keep));
+            lo[i] &= mask;
+            hi[i] |= static_cast<unsigned char>(~mask);
+        }
+        first = lt::address_v6(lo);
+        last = lt::address_v6(hi);
+    }
+    return true;
+}
+
+/// Reads one blocklist line. Understands the PeerGuardian text format ("Name:1.2.3.4-1.2.3.9", what
+/// Transmission lists use), eMule .dat ("1.2.3.4 - 1.2.3.9 , 000 , Name"), and bare ranges, CIDR
+/// blocks and single addresses. Returns NO for comments, blank lines and anything unrecognised.
+bool parseBlocklistLine(const std::string &raw, lt::address &first, lt::address &last) {
+    std::string line = trimmed(raw);
+    if (line.empty() || line[0] == '#' || line[0] == ';' || line.compare(0, 2, "//") == 0) return NO;
+
+    // eMule .dat: the access level follows the range, and 128 or more means "allowed". Only when the
+    // part before the comma is a range: PeerGuardian names often contain commas ("Foo, Inc:1.2.3.4-…").
+    size_t comma = line.find(',');
+    if (comma != std::string::npos && parseRange(line.substr(0, comma), first, last)) {
+        size_t next = line.find(',', comma + 1);
+        std::string level = trimmed(line.substr(comma + 1, next == std::string::npos ? std::string::npos : next - comma - 1));
+        if (!level.empty() && std::all_of(level.begin(), level.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); })
+            && level.size() <= 4 && std::stoi(level) >= 128) return NO;
+        return YES;
+    }
+    if (parseRange(line, first, last) || parseCIDR(line, first, last)) return YES;
+    if (parseAddress(line, first)) { last = first; return YES; }
+
+    // PeerGuardian: the name can contain colons, so try each one as the start of the range.
+    for (size_t colon = line.find(':'); colon != std::string::npos; colon = line.find(':', colon + 1)) {
+        std::string rest = line.substr(colon + 1);
+        if (parseRange(rest, first, last)) return YES;
+    }
+    return NO;
 }
 
 lt::settings_pack makePack(KTSessionSettings *s) {
     lt::settings_pack p;
     p.set_int(lt::settings_pack::alert_mask,
-              lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage);
+              lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage |
+              lt::alert_category::file_progress);
     p.set_str(lt::settings_pack::user_agent, "Piece/1.0 libtorrent/2.0");
     p.set_str(lt::settings_pack::peer_fingerprint, lt::generate_fingerprint("KT", 1, 0, 0, 0));
     std::string port = std::to_string(s.listenPort);
@@ -121,6 +289,8 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     p.set_int(lt::settings_pack::active_seeds, s.maxActiveSeeds);
     p.set_int(lt::settings_pack::active_limit, s.maxActiveDownloads + s.maxActiveSeeds + 10);
     p.set_int(lt::settings_pack::connections_limit, s.maxConnections);
+    // Merged trackers sit in tiers of their own; without this only the first working tier is used.
+    p.set_bool(lt::settings_pack::announce_to_all_tiers, true);
     int enc = s.requireEncryption ? lt::settings_pack::pe_forced : lt::settings_pack::pe_enabled;
     p.set_int(lt::settings_pack::out_enc_policy, enc);
     p.set_int(lt::settings_pack::in_enc_policy, enc);
@@ -135,11 +305,29 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     std::mutex _mutex;
     std::string _stateDir;
     std::atomic<int> _pendingResume;
+    std::vector<std::string> _mergeTrackers;
+    std::set<std::string> _filterKeys;
+    std::atomic<bool> _partSuffix;
+    // Renames in flight, keyed by (torrent, file index), with the name each is headed for.
+    std::mutex _renameMutex;
+    std::map<std::pair<std::string, int>, std::string> _renaming;
+    // "Finished" events held back until the torrent's files have their final names.
+    NSMutableDictionary<NSString *, KTEvent *> *_deferredFinished;
+    NSMutableDictionary<NSString *, NSDate *> *_deferredSince;
+    // The transfer hold: whether it's on, the torrents it must leave alone, and the ones it paused
+    // (mapped to whether each was auto-managed before).
+    std::mutex _holdMutex;
+    bool _holdActive;
+    std::set<std::string> _holdExempt;
+    std::map<std::string, bool> _held;
 }
 
 - (instancetype)initWithStateDirectory:(NSString *)stateDirectory settings:(KTSessionSettings *)settings {
     if ((self = [super init])) {
         _stateDir = stateDirectory.fileSystemRepresentation;
+        _partSuffix = settings.partSuffix;
+        _deferredFinished = [NSMutableDictionary dictionary];
+        _deferredSince = [NSMutableDictionary dictionary];
         [[NSFileManager defaultManager] createDirectoryAtPath:[stateDirectory stringByAppendingPathComponent:@"resume"]
                                   withIntermediateDirectories:YES
                                                    attributes:nil
@@ -180,6 +368,40 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     // libtorrent throws when a handle has gone away; never let that unwind into Swift.
     try {
         _session->apply_settings(makePack(settings));
+        bool changed = _partSuffix.exchange(settings.partSuffix) != bool(settings.partSuffix);
+        if (changed) [self reconcileAllPartNames];
+    } catch (const std::exception &) {
+    }
+}
+
+- (NSInteger)loadBlocklistAtPath:(NSString *)path {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        std::ifstream file(path.fileSystemRepresentation, std::ios::binary);
+        if (!file) return -1;
+        lt::ip_filter filter;
+        NSInteger rules = 0;
+        std::string line;
+        while (std::getline(file, line)) {
+            lt::address first, last;
+            if (!parseBlocklistLine(line, first, last)) continue;
+            if (first.is_v4() != last.is_v4()) continue;
+            if (last < first) std::swap(first, last);
+            filter.add_rule(first, last, lt::ip_filter::blocked);
+            ++rules;
+        }
+        // An empty or unreadable list never replaces the one in force.
+        if (rules == 0) return 0;
+        _session->set_ip_filter(std::move(filter));
+        return rules;
+    } catch (const std::exception &) {
+    }
+    return -1;
+}
+
+- (void)clearBlocklist {
+    try {
+        _session->set_ip_filter(lt::ip_filter());
     } catch (const std::exception &) {
     }
 }
@@ -201,6 +423,25 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     return NO;
 }
 
+/// The id `_handles` has this torrent under, falling back to its hash when it isn't (or no longer) there.
+- (std::string)keyFor:(const lt::torrent_handle &)h known:(bool *)known {
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        for (auto &entry : _handles) {
+            if (entry.second == h) {
+                if (known) *known = true;
+                return entry.first;
+            }
+        }
+    }
+    if (known) *known = false;
+    return hashString(h);
+}
+
+- (std::string)keyFor:(const lt::torrent_handle &)h {
+    return [self keyFor:h known:nullptr];
+}
+
 - (void)restoreTorrents {
     // libtorrent throws when a handle has gone away; never let that unwind into Swift.
     try {
@@ -213,11 +454,49 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             lt::error_code ec;
             lt::add_torrent_params atp = lt::read_resume_data(buf, ec);
             if (ec) continue;
+            [self holdIfNeeded:atp hash:hashString(atp.info_hashes)];
             lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);
             if (ec || !h.is_valid()) continue;
-            std::lock_guard<std::mutex> lock(_mutex);
-            _handles[hashString(h)] = h;
+            std::string key = hashString(h);
+            {
+                std::lock_guard<std::mutex> lock(_mutex);
+                _handles[key] = h;
+            }
+            // Saved by an earlier version under another id: move it to the stable one, so removing the
+            // transfer can't leave a copy behind that brings it back.
+            if (name.stringByDeletingPathExtension.UTF8String != key) {
+                std::remove([dir stringByAppendingPathComponent:name].fileSystemRepresentation);
+                h.save_resume_data(lt::torrent_handle::save_info_dict);
+                ++_pendingResume;
+            }
         }
+    } catch (const std::exception &) {
+    }
+}
+
+/// Adds the trackers in `atp` (a .torrent's announce list or a magnet's `tr=`) that the transfer doesn't have yet.
+- (void)mergeTrackersOf:(const lt::add_torrent_params &)atp intoTorrent:(NSString *)infoHash {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        lt::torrent_handle h;
+        if (![self handle:h forHash:infoHash]) return;
+        std::vector<lt::announce_entry> current = h.trackers();
+        std::set<std::string> have;
+        for (const lt::announce_entry &ae : current) have.insert(trackerKey(ae.url));
+        std::vector<std::string> incoming = atp.trackers;
+        if (atp.ti)
+            for (const lt::announce_entry &ae : atp.ti->trackers()) incoming.push_back(ae.url);
+        int maxTier = maxTierOf(current);
+        bool changed = false;
+        for (const std::string &url : incoming) {
+            std::string key = trackerKey(url);
+            if (key.empty() || !have.insert(key).second) continue;
+            h.add_tracker(nextTierEntry(url, maxTier));
+            changed = true;
+        }
+        // The filter list still wins over whatever the file brought along.
+        if ([self applyTrackerRulesTo:h]) changed = true;
+        if (changed) [self saveResumeDataFor:h];
     } catch (const std::exception &) {
     }
 }
@@ -229,13 +508,23 @@ lt::settings_pack makePack(KTSessionSettings *s) {
         std::string hash = hashString(atp.info_hashes.has_v1() || atp.info_hashes.has_v2()
                                           ? atp.info_hashes
                                           : (atp.ti ? atp.ti->info_hashes() : atp.info_hashes));
+        bool exists;
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            if (_handles.count(hash)) return toNS(hash);
+            exists = _handles.count(hash) > 0;
+        }
+        if (exists) {
+            // Already added: keep the transfer, but pick up any trackers the new torrent file or link knows.
+            [self mergeTrackersOf:atp intoTorrent:toNS(hash)];
+            return toNS(hash);
         }
         lt::error_code ec;
+        [self holdIfNeeded:atp hash:hash];
+        std::string requested = hash;
         lt::torrent_handle h = _session->add_torrent(std::move(atp), ec);
         if (ec || !h.is_valid()) {
+            std::lock_guard<std::mutex> lock(_holdMutex);
+            _held.erase(requested);
             if (error) *error = makeError(ec ? ec.message() : "The torrent could not be added.");
             return nil;
         }
@@ -244,6 +533,7 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             std::lock_guard<std::mutex> lock(_mutex);
             _handles[hash] = h;
         }
+        [self applyTrackerRulesTo:h];
         h.save_resume_data(lt::torrent_handle::save_info_dict);
         ++_pendingResume;
         return toNS(hash);
@@ -296,6 +586,12 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             std::lock_guard<std::mutex> lock(_mutex);
             _handles.erase(hash);
         }
+        [self endHoldFor:infoHash];
+        {
+            std::lock_guard<std::mutex> lock(_renameMutex);
+            for (auto it = _renaming.begin(); it != _renaming.end();)
+                it = it->first.first == hash ? _renaming.erase(it) : std::next(it);
+        }
         _session->remove_torrent(h, deleteFiles ? lt::session::delete_files : lt::remove_flags_t{});
         std::remove([self resumePathFor:hash].c_str());
     } catch (const std::exception &) {
@@ -307,6 +603,7 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     try {
         lt::torrent_handle h;
         if (![self handle:h forHash:infoHash]) return;
+        [self endHoldFor:infoHash];
         h.unset_flags(lt::torrent_flags::auto_managed);
         h.pause(lt::torrent_handle::graceful_pause);
     } catch (const std::exception &) {
@@ -318,11 +615,83 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     try {
         lt::torrent_handle h;
         if (![self handle:h forHash:infoHash]) return;
+        [self endHoldFor:infoHash];
         h.clear_error();
         h.set_flags(lt::torrent_flags::auto_managed);
         h.resume();
     } catch (const std::exception &) {
     }
+}
+
+- (void)forceStartTorrent:(NSString *)infoHash {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        lt::torrent_handle h;
+        if (![self handle:h forHash:infoHash]) return;
+        [self endHoldFor:infoHash];
+        h.clear_error();
+        h.unset_flags(lt::torrent_flags::auto_managed);
+        h.resume();
+    } catch (const std::exception &) {
+    }
+}
+
+// MARK: - Hold
+
+- (void)setHoldActive:(BOOL)active exempt:(NSArray<NSString *> *)exempt {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        std::set<std::string> keep;
+        for (NSString *hash in exempt) keep.insert(hash.UTF8String);
+        std::vector<std::pair<std::string, lt::torrent_handle>> handles;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            handles.assign(_handles.begin(), _handles.end());
+        }
+        std::lock_guard<std::mutex> lock(_holdMutex);
+        _holdActive = active;
+        _holdExempt = std::move(keep);
+        for (auto &entry : handles) {
+            try {
+                lt::torrent_handle &h = entry.second;
+                if (!h.is_valid()) continue;
+                const std::string &hash = entry.first;
+                bool hold = _holdActive && !_holdExempt.count(hash);
+                auto held = _held.find(hash);
+                if (hold && held == _held.end()) {
+                    lt::torrent_flags_t flags = h.flags();
+                    bool userPaused = (flags & lt::torrent_flags::paused) && !(flags & lt::torrent_flags::auto_managed);
+                    if (userPaused) continue;
+                    _held[hash] = bool(flags & lt::torrent_flags::auto_managed);
+                    h.unset_flags(lt::torrent_flags::auto_managed);
+                    h.pause();
+                } else if (!hold && held != _held.end()) {
+                    bool wasAutoManaged = held->second;
+                    _held.erase(held);
+                    if (wasAutoManaged) h.set_flags(lt::torrent_flags::auto_managed);
+                    h.resume();
+                }
+            } catch (const std::exception &) {
+            }
+        }
+    } catch (const std::exception &) {
+    }
+}
+
+/// Makes a torrent about to be added or restored start held, when the hold applies to it.
+- (void)holdIfNeeded:(lt::add_torrent_params &)atp hash:(const std::string &)hash {
+    std::lock_guard<std::mutex> lock(_holdMutex);
+    if (!_holdActive || _holdExempt.count(hash)) return;
+    bool userPaused = (atp.flags & lt::torrent_flags::paused) && !(atp.flags & lt::torrent_flags::auto_managed);
+    if (userPaused) return;
+    _held[hash] = bool(atp.flags & lt::torrent_flags::auto_managed);
+    atp.flags &= ~lt::torrent_flags::auto_managed;
+    atp.flags |= lt::torrent_flags::paused;
+}
+
+- (void)endHoldFor:(NSString *)infoHash {
+    std::lock_guard<std::mutex> lock(_holdMutex);
+    _held.erase(infoHash.UTF8String);
 }
 
 - (void)recheck:(NSString *)infoHash {
@@ -364,6 +733,11 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             std::lock_guard<std::mutex> lock(_mutex);
             handles.assign(_handles.begin(), _handles.end());
         }
+        std::set<std::string> held;
+        {
+            std::lock_guard<std::mutex> lock(_holdMutex);
+            for (auto &entry : _held) held.insert(entry.first);
+        }
         NSMutableArray<KTTorrentStatus *> *out = [NSMutableArray arrayWithCapacity:handles.size()];
         for (auto &entry : handles) {
             if (!entry.second.is_valid()) continue;
@@ -390,6 +764,7 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             }
             s.paused = bool(st.flags & lt::torrent_flags::paused);
             s.autoManaged = bool(st.flags & lt::torrent_flags::auto_managed);
+            s.held = held.count(entry.first) > 0;
             s.sequential = bool(st.flags & lt::torrent_flags::sequential_download);
             s.hasMetadata = st.has_metadata;
             s.progress = st.progress;
@@ -433,7 +808,8 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             int idx = static_cast<int>(i);
             KTFileEntry *f = [KTFileEntry new];
             f.index = idx;
-            f.path = toNS(fs.file_path(i));
+            f.path = toNS(ti->orig_files().file_path(i));
+            f.diskPath = toNS(fs.file_path(i));
             f.size = fs.file_size(i);
             f.downloaded = idx < static_cast<int>(progress.size()) ? progress[idx] : 0;
             f.priority = idx < static_cast<int>(priorities.size())
@@ -516,6 +892,104 @@ lt::settings_pack makePack(KTSessionSettings *s) {
         h.file_priority(lt::file_index_t(fileIndex), lt::download_priority_t(static_cast<std::uint8_t>(priority)));
     } catch (const std::exception &) {
     }
+}
+
+// MARK: - Trackers
+
+- (void)saveResumeDataFor:(lt::torrent_handle &)h {
+    h.save_resume_data(lt::torrent_handle::save_info_dict);
+    ++_pendingResume;
+}
+
+- (BOOL)addTracker:(NSString *)url toTorrent:(NSString *)infoHash {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        lt::torrent_handle h;
+        if (![self handle:h forHash:infoHash]) return NO;
+        std::string address = url.UTF8String;
+        std::string key = trackerKey(address);
+        if (key.empty()) return NO;
+        std::vector<lt::announce_entry> trackers = h.trackers();
+        for (const lt::announce_entry &ae : trackers)
+            if (trackerKey(ae.url) == key) return NO;
+        int maxTier = maxTierOf(trackers);
+        h.add_tracker(nextTierEntry(address, maxTier));
+        [self saveResumeDataFor:h];
+        return YES;
+    } catch (const std::exception &) {
+    }
+    return NO;
+}
+
+- (void)removeTracker:(NSString *)url fromTorrent:(NSString *)infoHash {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        lt::torrent_handle h;
+        if (![self handle:h forHash:infoHash]) return;
+        std::string key = trackerKey(url.UTF8String);
+        std::vector<lt::announce_entry> trackers = h.trackers();
+        auto end = std::remove_if(trackers.begin(), trackers.end(),
+                                  [&](const lt::announce_entry &ae) { return trackerKey(ae.url) == key; });
+        if (end == trackers.end()) return;
+        trackers.erase(end, trackers.end());
+        h.replace_trackers(trackers);
+        [self saveResumeDataFor:h];
+    } catch (const std::exception &) {
+    }
+}
+
+- (void)setMergeTrackers:(NSArray<NSString *> *)merge
+          filterTrackers:(NSArray<NSString *> *)filter
+         applyToExisting:(BOOL)applyToExisting {
+    std::vector<lt::torrent_handle> handles;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        _mergeTrackers.clear();
+        _filterKeys.clear();
+        for (NSString *url in merge) _mergeTrackers.push_back(url.UTF8String);
+        for (NSString *url in filter) _filterKeys.insert(trackerKey(url.UTF8String));
+        if (applyToExisting)
+            for (auto &entry : _handles) handles.push_back(entry.second);
+    }
+    for (lt::torrent_handle &h : handles) {
+        // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+        try {
+            if (h.is_valid() && [self applyTrackerRulesTo:h]) [self saveResumeDataFor:h];
+        } catch (const std::exception &) {
+        }
+    }
+}
+
+/// Strips filtered trackers and adds the missing merged ones. Returns YES when anything changed.
+- (BOOL)applyTrackerRulesTo:(lt::torrent_handle &)h {
+    std::vector<std::string> merge;
+    std::set<std::string> filter;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        merge = _mergeTrackers;
+        filter = _filterKeys;
+    }
+    if (merge.empty() && filter.empty()) return NO;
+    std::vector<lt::announce_entry> current = h.trackers();
+    std::vector<lt::announce_entry> kept;
+    std::set<std::string> have;
+    for (const lt::announce_entry &ae : current) {
+        std::string key = trackerKey(ae.url);
+        if (filter.count(key)) continue;
+        have.insert(key);
+        kept.push_back(ae);
+    }
+    bool changed = kept.size() != current.size();
+    if (changed) h.replace_trackers(kept);
+    int maxTier = maxTierOf(kept);
+    for (const std::string &url : merge) {
+        std::string key = trackerKey(url);
+        if (key.empty() || have.count(key) || filter.count(key)) continue;
+        h.add_tracker(nextTierEntry(url, maxTier));
+        have.insert(key);
+        changed = true;
+    }
+    return changed;
 }
 
 - (NSData *)pieceMapForTorrent:(NSString *)infoHash {
@@ -635,38 +1109,148 @@ lt::settings_pack makePack(KTSessionSettings *s) {
     return nil;
 }
 
+// MARK: - Part files
+
+/// Brings every file's name on disk in line with its state: `name.part` while incomplete (when the
+/// option is on), the torrent's own name otherwise. Safe to call at any time; it only renames what differs.
+- (void)reconcilePartNames:(lt::torrent_handle &)h {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        if (!h.is_valid()) return;
+        lt::torrent_status st = h.status(lt::status_flags_t{});
+        // Until the check is done nothing is known about which files are complete.
+        if (!st.has_metadata || st.state == lt::torrent_status::checking_files ||
+            st.state == lt::torrent_status::checking_resume_data ||
+            st.state == lt::torrent_status::downloading_metadata) return;
+        auto ti = h.torrent_file();
+        if (!ti) return;
+        const lt::file_storage &fs = ti->files();
+        const lt::file_storage &orig = ti->orig_files();
+        if (fs.num_files() != orig.num_files()) return;
+        std::vector<std::int64_t> progress;
+        h.file_progress(progress, lt::torrent_handle::piece_granularity);
+        std::string hash = [self keyFor:h];
+        bool enabled = _partSuffix;
+        for (lt::file_index_t i : fs.file_range()) {
+            if (fs.pad_file_at(i)) continue;
+            int idx = static_cast<int>(i);
+            bool complete = fs.file_size(i) == 0 ||
+                            (idx < static_cast<int>(progress.size()) && progress[idx] >= fs.file_size(i));
+            std::string target = orig.file_path(i);
+            if (enabled && !complete) target += ".part";
+            if (fs.file_path(i) == target) continue;
+            {
+                std::lock_guard<std::mutex> lock(_renameMutex);
+                auto &pending = _renaming[{hash, idx}];
+                if (pending == target) continue;
+                pending = target;
+            }
+            h.rename_file(i, target);
+        }
+    } catch (const std::exception &) {
+    }
+}
+
+- (void)reconcileAllPartNames {
+    // libtorrent throws when a handle has gone away; never let that unwind into Swift.
+    try {
+        std::vector<lt::torrent_handle> handles;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            for (auto &entry : _handles) handles.push_back(entry.second);
+        }
+        for (lt::torrent_handle &h : handles) [self reconcilePartNames:h];
+    } catch (const std::exception &) {
+    }
+}
+
+- (void)renameFinished:(const lt::torrent_handle &)h file:(lt::file_index_t)index {
+    std::string key = [self keyFor:h];
+    std::lock_guard<std::mutex> lock(_renameMutex);
+    _renaming.erase({key, static_cast<int>(index)});
+}
+
+- (BOOL)hasRenamesInFlightFor:(const std::string &)hash {
+    std::lock_guard<std::mutex> lock(_renameMutex);
+    auto it = _renaming.lower_bound({hash, std::numeric_limits<int>::min()});
+    return it != _renaming.end() && it->first.first == hash;
+}
+
+/// Moves a held-back "finished" event into `out` once its torrent has no renames left (or has waited too long).
+- (void)releaseDeferredFinished:(NSMutableArray<KTEvent *> *)out forHash:(NSString *)hash force:(BOOL)force {
+    KTEvent *event = _deferredFinished[hash];
+    if (!event) return;
+    if (!force && [self hasRenamesInFlightFor:hash.UTF8String]) return;
+    [out addObject:event];
+    [_deferredFinished removeObjectForKey:hash];
+    [_deferredSince removeObjectForKey:hash];
+}
+
 - (NSArray<KTEvent *> *)pollEvents {
     // libtorrent throws when a handle has gone away; never let that unwind into Swift.
     try {
         std::vector<lt::alert *> alerts;
         _session->pop_alerts(&alerts);
         NSMutableArray<KTEvent *> *out = [NSMutableArray array];
+        // Torrents whose file names changed; their resume data is rewritten once, so a crash can't leave it pointing at old names.
+        std::map<std::string, lt::torrent_handle> renamed;
         for (lt::alert *a : alerts) {
             try {
             if (auto *rd = lt::alert_cast<lt::save_resume_data_alert>(a)) {
                 --_pendingResume;
-                std::string hash = hashString(rd->params.info_hashes);
-                bool known;
-                {
-                    std::lock_guard<std::mutex> lock(_mutex);
-                    known = _handles.count(hash) > 0;
-                }
+                bool known = false;
+                std::string hash = [self keyFor:rd->handle known:&known];
                 // A torrent removed while its save was in flight must not come back at next launch.
-                if (known) writeFile([self resumePathFor:hash], lt::write_resume_data_buf(rd->params));
+                if (known) {
+                    // Save the transfer as the user left it, not as the hold has it.
+                    std::optional<bool> heldAutoManaged;
+                    {
+                        std::lock_guard<std::mutex> lock(_holdMutex);
+                        auto held = _held.find(hash);
+                        if (held != _held.end()) heldAutoManaged = held->second;
+                    }
+                    if (heldAutoManaged) {
+                        lt::add_torrent_params params = rd->params;
+                        params.flags &= ~lt::torrent_flags::paused;
+                        if (*heldAutoManaged) params.flags |= lt::torrent_flags::auto_managed;
+                        writeFile([self resumePathFor:hash], lt::write_resume_data_buf(params));
+                    } else {
+                        writeFile([self resumePathFor:hash], lt::write_resume_data_buf(rd->params));
+                    }
+                }
             } else if (lt::alert_cast<lt::save_resume_data_failed_alert>(a)) {
                 --_pendingResume;
             } else if (auto *fin = lt::alert_cast<lt::torrent_finished_alert>(a)) {
                 KTEvent *e = [KTEvent new];
                 e.type = KTEventTypeFinished;
-                e.infoHash = toNS(hashString(fin->handle));
+                e.infoHash = toNS([self keyFor:fin->handle]);
                 e.message = toNS(fin->torrent_name());
-                [out addObject:e];
+                // The library reads the files as soon as it hears this, so wait until they have their final names.
+                [self reconcilePartNames:fin->handle];
+                if ([self hasRenamesInFlightFor:e.infoHash.UTF8String]) {
+                    _deferredFinished[e.infoHash] = e;
+                    _deferredSince[e.infoHash] = [NSDate date];
+                } else {
+                    [out addObject:e];
+                }
                 fin->handle.save_resume_data(lt::torrent_handle::save_info_dict);
                 ++_pendingResume;
+            } else if (auto *fc = lt::alert_cast<lt::file_completed_alert>(a)) {
+                [self reconcilePartNames:fc->handle];
+            } else if (auto *sc = lt::alert_cast<lt::state_changed_alert>(a)) {
+                [self reconcilePartNames:sc->handle];
+            } else if (auto *fr = lt::alert_cast<lt::file_renamed_alert>(a)) {
+                [self renameFinished:fr->handle file:fr->index];
+                std::string key = [self keyFor:fr->handle];
+                renamed[key] = fr->handle;
+                [self releaseDeferredFinished:out forHash:toNS(key) force:NO];
+            } else if (auto *ff = lt::alert_cast<lt::file_rename_failed_alert>(a)) {
+                [self renameFinished:ff->handle file:ff->index];
+                [self releaseDeferredFinished:out forHash:toNS([self keyFor:ff->handle]) force:NO];
             } else if (auto *md = lt::alert_cast<lt::metadata_received_alert>(a)) {
                 KTEvent *e = [KTEvent new];
                 e.type = KTEventTypeMetadataReceived;
-                e.infoHash = toNS(hashString(md->handle));
+                e.infoHash = toNS([self keyFor:md->handle]);
                 e.message = toNS(md->torrent_name());
                 [out addObject:e];
                 md->handle.save_resume_data(lt::torrent_handle::save_info_dict);
@@ -674,19 +1258,27 @@ lt::settings_pack makePack(KTSessionSettings *s) {
             } else if (auto *err = lt::alert_cast<lt::torrent_error_alert>(a)) {
                 KTEvent *e = [KTEvent new];
                 e.type = KTEventTypeError;
-                e.infoHash = toNS(hashString(err->handle));
+                e.infoHash = toNS([self keyFor:err->handle]);
                 e.message = toNS(err->error.message());
                 [out addObject:e];
             } else if (auto *ferr = lt::alert_cast<lt::file_error_alert>(a)) {
                 KTEvent *e = [KTEvent new];
                 e.type = KTEventTypeError;
-                e.infoHash = toNS(hashString(ferr->handle));
+                e.infoHash = toNS([self keyFor:ferr->handle]);
                 e.message = toNS(ferr->error.message());
                 [out addObject:e];
             }
             } catch (const std::exception &) {
                 // The alert's torrent was removed before it was processed.
             }
+        }
+        for (auto &entry : renamed) {
+            if (!entry.second.is_valid()) continue;
+            entry.second.save_resume_data(lt::torrent_handle::save_info_dict);
+            ++_pendingResume;
+        }
+        for (NSString *hash in [_deferredSince allKeys]) {
+            if (-[_deferredSince[hash] timeIntervalSinceNow] > 10) [self releaseDeferredFinished:out forHash:hash force:YES];
         }
         return out;
     } catch (const std::exception &) {
@@ -697,6 +1289,8 @@ lt::settings_pack makePack(KTSessionSettings *s) {
 - (void)saveResumeData {
     // libtorrent throws when a handle has gone away; never let that unwind into Swift.
     try {
+        // Picks up anything the alerts missed, such as a paused torrent that never changed state.
+        if (!_session->is_paused()) [self reconcileAllPartNames];
         std::vector<lt::torrent_handle> handles;
         {
             std::lock_guard<std::mutex> lock(_mutex);

@@ -85,11 +85,17 @@ struct RootView: View {
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
             if isTransfers {
+                // One action for the whole selection, matching the label: resume when every selected transfer can
+                // be resumed, otherwise pause the ones that are running.
+                let resumesAll = !selected.isEmpty && selected.allSatisfy(\.canResume)
                 Button {
-                    selected.forEach { app.torrents.toggle($0) }
+                    if resumesAll {
+                        selected.forEach(app.torrents.resume)
+                    } else {
+                        selected.filter { !$0.canResume }.forEach(app.torrents.pause)
+                    }
                 } label: {
-                    let allPaused = !selected.isEmpty && selected.allSatisfy { $0.phase == .paused || $0.phase == .completed }
-                    Label(allPaused ? "Resume" : "Pause", systemImage: allPaused ? "play.fill" : "pause.fill")
+                    Label(resumesAll ? "Resume" : "Pause", systemImage: resumesAll ? "play.fill" : "pause.fill")
                 }
                 .disabled(selected.isEmpty)
                 .help("Pause or resume the selected transfers")

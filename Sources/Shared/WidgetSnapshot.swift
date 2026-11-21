@@ -25,7 +25,14 @@ struct WidgetSnapshot: Codable, Equatable {
     var recents: [Recent]
     var savedBytes: Int64
 
-    static let groupID = "group.me.kylebolton.piece"
+    static let groupID: String = {
+        if let bundleID = Bundle.main.bundleIdentifier {
+            return "group." + bundleID
+        }
+        else {
+            return "group.me.kylebolton.piece"
+        }
+    }()
     static let fileName = "widget.json"
 
     static var empty: WidgetSnapshot {

@@ -15,20 +15,34 @@ final class TorrentStore {
     var onFinished: ((Torrent) -> Void)?
 
     @ObservationIgnored let session: KTSession
+    /// Holds transfers on battery power or a metered connection, when the user asked for it.
+    let policy: TransferPolicy
     @ObservationIgnored private let queue = DispatchQueue(label: "Piece.engine", qos: .userInitiated)
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var tick = 0
     @ObservationIgnored private var byID: [String: Torrent] = [:]
     @ObservationIgnored private var isShutDown = false
+    /// Transfers seen downloading (or fetching metadata) during this run. libtorrent also reports "finished"
+    /// for completed torrents it restores at launch; only these ones have really just finished.
+    @ObservationIgnored private var seenIncomplete: Set<String> = []
+    /// Removed transfers that a status poll already in flight may still report; kept out until it stops.
+    @ObservationIgnored private var removedIDs: Set<String> = []
 
     init(settings: AppSettings) {
         let state = AppPaths.directory("State").path
         session = KTSession(stateDirectory: state, settings: settings.sessionSettings)
+        policy = TransferPolicy(settings: settings)
+        // Restored transfers keep whatever trackers they were saved with; the rules were applied
+        // when they were added, or when the rules last changed.
+        session.setMergeTrackers(settings.trackers(.merge), filterTrackers: settings.trackers(.filter), applyToExisting: false)
     }
 
     func start() {
         if DemoTorrents.isEnabled { loadDemo(); return }
         let session = session
+        policy.onChange = { [weak self] active, exempt in self?.applyHold(active, exempt: exempt) }
+        // Decides the hold before anything is restored, so held transfers never start at launch.
+        policy.start()
         queue.async { [weak self] in
             session.restoreTorrents()
             Task { @MainActor in self?.refresh() }
@@ -55,7 +69,22 @@ final class TorrentStore {
         queue.async { session.apply(s) }
     }
 
+    /// Pushes the app-wide tracker lists to the engine and applies them to every current transfer.
+    func applyTrackerRules(_ settings: AppSettings) {
+        let merge = settings.trackers(.merge), filter = settings.trackers(.filter)
+        let session = session
+        queue.async { session.setMergeTrackers(merge, filterTrackers: filter, applyToExisting: true) }
+    }
+
     func torrent(_ id: String) -> Torrent? { byID[id] }
+
+    private func applyHold(_ active: Bool, exempt: Set<String>) {
+        guard !isShutDown else { return }
+        let session = session
+        let hashes = Array(exempt)
+        queue.async { session.setHoldActive(active, exempt: hashes) }
+        refresh()
+    }
 
     // MARK: - Polling
 
@@ -76,7 +105,8 @@ final class TorrentStore {
         var seen = Set<String>()
         var down = 0, up = 0
         var added = false
-        for status in statuses {
+        removedIDs.formIntersection(statuses.map(\.infoHash))
+        for status in statuses where !removedIDs.contains(status.infoHash) {
             seen.insert(status.infoHash)
             let torrent: Torrent
             if let existing = byID[status.infoHash] {
@@ -88,12 +118,15 @@ final class TorrentStore {
                 added = true
             }
             torrent.apply(status)
+            if status.state == .downloading || status.state == .fetchingMetadata { seenIncomplete.insert(status.infoHash) }
+            if status.held, torrent.heldStatus != policy.heldStatus { torrent.heldStatus = policy.heldStatus }
             down += Int(status.downloadRate)
             up += Int(status.uploadRate)
         }
         if seen.count != torrents.count {
             torrents.removeAll { !seen.contains($0.id) }
             byID = byID.filter { seen.contains($0.key) }
+            seenIncomplete.formIntersection(seen)
         }
         if added { torrents.sort { $0.dateAdded > $1.dateAdded } }
         if downloadRate != down { downloadRate = down }
@@ -106,7 +139,7 @@ final class TorrentStore {
             switch event.type {
             case .finished:
                 // libtorrent also reports "finished" when a completed torrent is restored at launch.
-                if torrent.totalDownloaded > 0 || Date().timeIntervalSince(torrent.dateAdded) < 60 {
+                if seenIncomplete.remove(event.infoHash) != nil || Date().timeIntervalSince(torrent.dateAdded) < 60 {
                     onFinished?(torrent)
                 }
             case .error:
@@ -124,6 +157,7 @@ final class TorrentStore {
         let path = savePath ?? AppSettings.shared.downloadFolder
         do {
             let hash = try session.addMagnet(magnet, savePath: path)
+            removedIDs.remove(hash)
             refresh()
             return hash
         } catch {
@@ -133,14 +167,15 @@ final class TorrentStore {
     }
 
     @discardableResult
-    func add(torrentData: Data, savePath: String? = nil) -> String? {
+    func add(torrentData: Data, savePath: String? = nil, reportErrors: Bool = true) -> String? {
         let path = savePath ?? AppSettings.shared.downloadFolder
         do {
             let hash = try session.addTorrentData(torrentData, savePath: path)
+            removedIDs.remove(hash)
             refresh()
             return hash
         } catch {
-            lastError = error.localizedDescription
+            if reportErrors { lastError = error.localizedDescription }
             return nil
         }
     }
@@ -155,11 +190,11 @@ final class TorrentStore {
     }
 
     /// Accepts a magnet link, an http(s) link to a .torrent file, or a bare info-hash.
-    func add(link: String) async -> String? {
+    func add(link: String, savePath: String? = nil) async -> String? {
         let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.lowercased().hasPrefix("magnet:") { return add(magnet: text) }
+        if text.lowercased().hasPrefix("magnet:") { return add(magnet: text, savePath: savePath) }
         if text.range(of: "^[0-9a-fA-F]{40}$", options: .regularExpression) != nil {
-            return add(magnet: "magnet:?xt=urn:btih:\(text)")
+            return add(magnet: "magnet:?xt=urn:btih:\(text)", savePath: savePath)
         }
         guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), scheme.hasPrefix("http") else {
             lastError = "That doesn't look like a magnet link or torrent URL."
@@ -170,12 +205,12 @@ final class TorrentStore {
             request.setValue(HTTP.userAgent, forHTTPHeaderField: "User-Agent")
             let redirectGuard = MagnetRedirectGuard()
             let (data, _) = try await URLSession.shared.data(for: request, delegate: redirectGuard)
-            if let magnet = redirectGuard.magnet { return add(magnet: magnet) }
+            if let magnet = redirectGuard.magnet { return add(magnet: magnet, savePath: savePath) }
             if let text = String(data: data.prefix(4096), encoding: .utf8),
                let magnet = text.firstMatch(of: /magnet:\?xt=urn:bt[a-z0-9]+:[^"'<\s]+/) {
-                return add(magnet: String(magnet.0))
+                return add(magnet: String(magnet.0), savePath: savePath)
             }
-            return add(torrentData: data)
+            return add(torrentData: data, savePath: savePath)
         } catch {
             lastError = "Couldn't download the torrent: \(error.localizedDescription)"
             return nil
@@ -185,17 +220,32 @@ final class TorrentStore {
     // MARK: - Control
 
     func pause(_ torrent: Torrent) {
-        session.pauseTorrent(torrent.id)
+        policy.forget(torrent.id)
+        let session = session, id = torrent.id
+        // On the engine queue like resume, so the two always run in the order they were asked for.
+        queue.async { session.pauseTorrent(id) }
         refresh()
     }
 
+    /// While transfers are held, resuming one lets it run anyway until the conditions change.
     func resume(_ torrent: Torrent) {
-        session.resumeTorrent(torrent.id)
+        if policy.isHolding { policy.resumeAnyway(torrent.id) }
+        let session = session, id = torrent.id
+        // After the hold update queued above, so the hold doesn't pause it again.
+        queue.async { session.resumeTorrent(id) }
+        refresh()
+    }
+
+    /// Starts a transfer that is waiting in the queue, for playback that can't wait for its turn.
+    func forceStart(_ torrent: Torrent) {
+        if policy.isHolding { policy.resumeAnyway(torrent.id) }
+        let session = session, id = torrent.id
+        queue.async { session.forceStartTorrent(id) }
         refresh()
     }
 
     func toggle(_ torrent: Torrent) {
-        if torrent.phase == .paused || (torrent.phase == .completed) || torrent.phase == .error {
+        if torrent.canResume {
             resume(torrent)
         } else {
             pause(torrent)
@@ -204,6 +254,7 @@ final class TorrentStore {
 
     func remove(_ torrent: Torrent, deleteFiles: Bool) {
         session.removeTorrent(torrent.id, deleteFiles: deleteFiles)
+        removedIDs.insert(torrent.id)
         torrents.removeAll { $0.id == torrent.id }
         byID[torrent.id] = nil
     }
@@ -211,8 +262,20 @@ final class TorrentStore {
     func recheck(_ torrent: Torrent) { session.recheck(torrent.id) }
     func reannounce(_ torrent: Torrent) { session.reannounceTorrent(torrent.id) }
 
-    func pauseAll() { torrents.forEach { session.pauseTorrent($0.id) }; refresh() }
-    func resumeAll() { torrents.forEach { session.resumeTorrent($0.id) }; refresh() }
+    func pauseAll() {
+        policy.endOverride()
+        let session = session, ids = torrents.map(\.id)
+        queue.async { ids.forEach(session.pauseTorrent) }
+        refresh()
+    }
+
+    /// While transfers are held this is "Resume Anyway" for everything.
+    func resumeAll() {
+        if policy.isHolding { policy.overrideHold() }
+        let session = session, ids = torrents.map(\.id)
+        queue.async { ids.forEach(session.resumeTorrent) }
+        refresh()
+    }
 
     // MARK: - Details
 
@@ -251,6 +314,24 @@ final class TorrentStore {
         }
     }
 
+    /// Returns false when the transfer already has that tracker.
+    func addTracker(_ url: String, to id: String) async -> Bool {
+        let session = session
+        return await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: session.addTracker(url, toTorrent: id)) }
+        }
+    }
+
+    func removeTracker(_ url: String, from id: String) async {
+        let session = session
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            queue.async {
+                session.removeTracker(url, fromTorrent: id)
+                continuation.resume()
+            }
+        }
+    }
+
     func pieceMap(for id: String) async -> [UInt8] {
         let session = session
         return await withCheckedContinuation { continuation in
@@ -268,13 +349,20 @@ final class TorrentStore {
         (torrent.savePath as NSString).appendingPathComponent(file.path)
     }
 
+    /// The file as it is on disk right now: its final path, or the `.part` one while it is still downloading.
+    func onDiskPath(of file: TorrentFile, in torrent: Torrent) -> String {
+        let final = absolutePath(of: file, in: torrent)
+        let current = (torrent.savePath as NSString).appendingPathComponent(file.diskPath)
+        return FileManager.default.fileExists(atPath: current) ? current : PartFile.resolve(final)
+    }
+
     /// Top-level file or folder the torrent was saved as.
     func contentURL(of torrent: Torrent) -> URL {
         URL(fileURLWithPath: torrent.savePath).appendingPathComponent(torrent.name)
     }
 
     func revealInFinder(_ torrent: Torrent) {
-        let url = contentURL(of: torrent)
+        let url = URL(fileURLWithPath: PartFile.resolve(contentURL(of: torrent).path))
         if FileManager.default.fileExists(atPath: url.path) {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } else {

@@ -25,6 +25,8 @@ NS_SWIFT_SENDABLE
 @property (nonatomic) KTTorrentState state;
 @property (nonatomic) BOOL paused;
 @property (nonatomic) BOOL autoManaged;
+/// Paused by the transfer hold (see `setHoldActive:exempt:`), not by the user.
+@property (nonatomic) BOOL held;
 @property (nonatomic) BOOL hasMetadata;
 @property (nonatomic) BOOL sequential;
 @property (nonatomic) float progress;
@@ -46,7 +48,10 @@ NS_SWIFT_SENDABLE
 NS_SWIFT_SENDABLE
 @interface KTFileEntry : NSObject
 @property (nonatomic) int index;
+/// The file's real path inside the torrent; stays the same while it carries a `.part` suffix on disk.
 @property (nonatomic, copy) NSString *path;
+/// What the file is called on disk right now: `path`, or `path` + ".part" while it is incomplete.
+@property (nonatomic, copy) NSString *diskPath;
 @property (nonatomic) int64_t size;
 @property (nonatomic) int64_t downloaded;
 @property (nonatomic) int priority;
@@ -92,6 +97,8 @@ NS_SWIFT_SENDABLE
 @property (nonatomic) BOOL enableLSD;
 @property (nonatomic) BOOL enablePortMapping;
 @property (nonatomic) BOOL requireEncryption;
+/// Incomplete files carry a `.part` suffix on disk until they finish downloading.
+@property (nonatomic) BOOL partSuffix;
 @end
 
 /// Thin wrapper around a libtorrent session. All methods are thread-safe.
@@ -120,15 +127,38 @@ NS_SWIFT_SENDABLE
 - (void)removeTorrent:(NSString *)infoHash deleteFiles:(BOOL)deleteFiles;
 - (void)pauseTorrent:(NSString *)infoHash;
 - (void)resumeTorrent:(NSString *)infoHash;
+/// Starts a transfer now even when the queue would keep it waiting: it leaves automatic queueing.
+- (void)forceStartTorrent:(NSString *)infoHash;
 - (void)recheck:(NSString *)infoHash;
 - (void)reannounceTorrent:(NSString *)infoHash;
 - (void)setSequential:(BOOL)sequential forTorrent:(NSString *)infoHash;
+
+/// While active, every transfer the user hasn't paused and that isn't in `exempt` is paused and marked
+/// `held`; torrents added or restored meanwhile start held. Lifting it (or exempting a torrent) resumes
+/// exactly the ones it paused. Saved resume data never records a hold, so a quit or crash while held
+/// brings transfers back as the user left them. Pausing or resuming a held torrent ends its hold.
+- (void)setHoldActive:(BOOL)active exempt:(NSArray<NSString *> *)exempt;
 
 - (NSArray<KTTorrentStatus *> *)statuses;
 - (NSArray<KTFileEntry *> *)filesForTorrent:(NSString *)infoHash;
 - (NSArray<KTPeerInfo *> *)peersForTorrent:(NSString *)infoHash;
 - (NSArray<KTTrackerInfo *> *)trackersForTorrent:(NSString *)infoHash;
 - (void)setPriority:(int)priority forFile:(int)fileIndex inTorrent:(NSString *)infoHash;
+
+/// Returns NO when the torrent already announces to that tracker.
+- (BOOL)addTracker:(NSString *)url toTorrent:(NSString *)infoHash;
+- (void)removeTracker:(NSString *)url fromTorrent:(NSString *)infoHash;
+/// Trackers added to every torrent (`merge`) and stripped from every torrent (`filter`).
+/// Torrents added from now on always follow them; current ones only when `applyToExisting` is set.
+- (void)setMergeTrackers:(NSArray<NSString *> *)merge
+          filterTrackers:(NSArray<NSString *> *)filter
+         applyToExisting:(BOOL)applyToExisting;
+
+/// Blocks every peer address in the plain-text list at `path` (PeerGuardian, eMule .dat, ranges, CIDR).
+/// Returns the number of rules, 0 when the file has none (the list in force is kept), -1 when it can't be read.
+- (NSInteger)loadBlocklistAtPath:(NSString *)path;
+/// Lets every peer connect again.
+- (void)clearBlocklist;
 
 /// One byte per piece: 1 when the piece has been downloaded and verified.
 - (NSData *)pieceMapForTorrent:(NSString *)infoHash;

@@ -37,6 +37,21 @@ final class TagAndSearchTests: XCTestCase {
         XCTAssertEqual(second.tags(for: "x").map(\.name), ["Keep"])
     }
 
+    func testSavedSearchesToggleDedupeAndPersist() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("saved-\(UUID().uuidString).json")
+        let first = SavedSearchStore(fileURL: url)
+        first.toggle("  Ubuntu 24.04 ")
+        XCTAssertTrue(first.isSaved("ubuntu 24.04"))
+        XCTAssertNil(first.add("   "))
+        first.add("debian")
+        first.add("DEBIAN")
+        XCTAssertEqual(first.searches.map(\.query), ["debian", "Ubuntu 24.04"])
+        let second = SavedSearchStore(fileURL: url)
+        XCTAssertEqual(second.searches.count, 2)
+        second.toggle("debian")
+        XCTAssertFalse(second.isSaved("debian"))
+    }
+
     func testQueryParsing() {
         let query = SearchQuery("Bat 2022 #kids")
         XCTAssertEqual(query.words, ["bat", "2022"])

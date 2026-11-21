@@ -16,6 +16,18 @@ enum Format {
         bytesPerSecond <= 0 ? "0 KB/s" : "\(bytes(Int64(bytesPerSecond)))/s"
     }
 
+    /// Always one decimal place ("0.8 KB/s", "12.0 MB/s"), so the text width only
+    /// changes when the unit or the number of whole digits changes.
+    static func fixedRate(_ bytesPerSecond: Int) -> String {
+        var value = Double(max(0, bytesPerSecond)) / 1000
+        var unit = "KB"
+        for next in ["MB", "GB"] where value >= 999.95 {
+            value /= 1000
+            unit = next
+        }
+        return String(format: "%.1f %@/s", value, unit)
+    }
+
     static func percent(_ fraction: Double) -> String {
         let clamped = min(max(fraction, 0), 1)
         return clamped >= 0.9995 ? "100%" : String(format: "%.1f%%", clamped * 100)
@@ -103,6 +115,20 @@ enum FileKind {
         case .document: "doc.text"
         case .other: "doc"
         }
+    }
+}
+
+/// Files that are still downloading can carry a `.part` suffix on disk (see the "Add .part" setting).
+enum PartFile {
+    static let suffix = ".part"
+
+    /// `path` if that file exists, otherwise `path.part` if that does, otherwise `path`.
+    /// Everything in the app refers to a file by its final name; this finds where it is right now.
+    static func resolve(_ path: String) -> String {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: path) { return path }
+        let partial = path + suffix
+        return fm.fileExists(atPath: partial) ? partial : path
     }
 }
 

@@ -49,7 +49,10 @@ struct MediaItem: Identifiable, Codable, Hashable {
 
     var url: URL { URL(fileURLWithPath: path) }
     var isPacked: Bool { packedFile != nil }
-    var fileExists: Bool { FileManager.default.fileExists(atPath: path) }
+    /// The archive holding this item while it is packed.
+    var packURL: URL? { packedFile.map { AppPaths.directory("Packs").appendingPathComponent($0) } }
+    /// Whether the item is still on disk: as itself, or inside its pack while packed.
+    var fileExists: Bool { FileManager.default.fileExists(atPath: packURL?.path ?? path) }
 
     var artworkURL: URL? { artworkFile.map { AppPaths.artwork.appendingPathComponent($0) } }
     var backdropURL: URL? { backdropFile.map { AppPaths.artwork.appendingPathComponent($0) } }

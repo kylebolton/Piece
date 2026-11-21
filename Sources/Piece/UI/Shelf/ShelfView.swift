@@ -103,7 +103,7 @@ struct ShelfView: View {
                 if !query.isEmpty { searchFooter(entries: entries, query: query) }
             }
         }
-        .background(ShelfBackdrop().ignoresSafeArea())
+        .background(ShelfBackdrop().liquidGlassBackgroundExtension().ignoresSafeArea())
         .sheet(item: $detail) { MediaDetailSheet(itemID: $0.id) }
         .sheet(item: $openShow) { show in
             ShowDetailView(show: show) { openShow = nil }.frame(minWidth: 760, minHeight: 520)
@@ -377,7 +377,7 @@ struct ShelfSearchField: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(.primary.opacity(0.07), in: Capsule())
+        .liquidGlassEffect(type: .field)
         .frame(width: 260)
     }
 }

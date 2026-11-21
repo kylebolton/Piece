@@ -57,6 +57,12 @@ final class ReleaseNameParserTests: XCTestCase {
         XCTAssertEqual(episode?.season, 1)
         XCTAssertEqual(episode?.episode, 3)
 
+        let inSeasonFolder = LibraryStore.classify(path: "/d/The Wire/Season 2/03 - Hot Shots.mkv", size: 900_000_000)
+        XCTAssertEqual(inSeasonFolder?.kind, .episode)
+        XCTAssertEqual(inSeasonFolder?.showTitle, "The Wire")
+        XCTAssertEqual(inSeasonFolder?.season, 2)
+        XCTAssertEqual(inSeasonFolder?.episode, 3)
+
         let track = LibraryStore.classify(path: "/d/Album Name/03 - Song Title.flac", size: 30_000_000)
         XCTAssertEqual(track?.kind, .track)
         XCTAssertEqual(track?.title, "Song Title")
@@ -64,6 +70,9 @@ final class ReleaseNameParserTests: XCTestCase {
         XCTAssertEqual(track?.album, "Album Name")
 
         XCTAssertNil(LibraryStore.classify(path: "/d/Movie/sample.mkv", size: 20_000_000))
+        XCTAssertNil(LibraryStore.classify(path: "/d/Movie/Film.2010.Trailer.mkv", size: 20_000_000))
+        XCTAssertNil(LibraryStore.classify(path: "/d/Show/Show.S01E01.sample.mkv", size: 20_000_000))
+        XCTAssertEqual(LibraryStore.classify(path: "/d/TPB/Trailer.Park.Boys.S01E01.mkv", size: 150_000_000)?.kind, .episode)
         XCTAssertNil(LibraryStore.classify(path: "/d/Movie/readme.txt", size: 100))
     }
 
@@ -128,7 +137,148 @@ final class SubtitleTests: XCTestCase {
         XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Subs/English.srt"), "en")
         XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "2_French.srt"), "fr")
         XCTAssertNil(SubtitleLanguage.guess(fromFilename: "Movie.2019.srt"))
-        XCTAssertEqual(SubtitleLanguage.code(for: "pt-BR"), "pt")
+        XCTAssertNil(SubtitleLanguage.guess(fromFilename: "Ice.Age.2002.srt"))
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.en.forced.srt"), "en")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.eng.SDH.srt"), "en")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.en.hi.srt"), "en")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.hi.srt"), "hi")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.en.2.srt"), "en")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.en-US.srt"), "en")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.English.YIFY.srt"), "en")
+    }
+
+    func testLanguageVariants() {
+        // Portuguese
+        XCTAssertEqual(SubtitleLanguage.identify("pt-BR"), "pt-br")
+        XCTAssertEqual(SubtitleLanguage.identify("pt_PT"), "pt-pt")
+        XCTAssertEqual(SubtitleLanguage.identify("pob"), "pt-br")
+        XCTAssertEqual(SubtitleLanguage.identify("por"), "pt")
+        XCTAssertEqual(SubtitleLanguage.identify("Português"), "pt")
+        XCTAssertEqual(SubtitleLanguage.identify("pt-AO"), "pt-pt")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.pt-BR.srt"), "pt-br")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.pt-PT.forced.srt"), "pt-pt")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.por.srt"), "pt")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Subs/3_Brazilian.Portuguese.srt"), "pt-br")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.Portuguese (Brazil).srt"), "pt-br")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.ptbr.srt"), "pt-br")
+        XCTAssertEqual(SubtitleLanguage.identify(tag: "por", title: "Brazilian"), "pt-br")
+        XCTAssertEqual(SubtitleLanguage.identify(tag: "por", title: "Português (Portugal)"), "pt-pt")
+        XCTAssertEqual(SubtitleLanguage.identify(tag: "por", title: "European Portuguese [Forced]"), "pt-pt")
+        XCTAssertEqual(SubtitleLanguage.identify(tag: "por", title: "SDH"), "pt")
+        XCTAssertEqual(SubtitleLanguage.identify(tag: nil, title: "Português do Brasil"), "pt-br")
+
+        // Spanish
+        XCTAssertEqual(SubtitleLanguage.identify("es-419"), "ea")
+        XCTAssertEqual(SubtitleLanguage.identify("es-MX"), "ea")
+        XCTAssertEqual(SubtitleLanguage.identify("es-ES"), "sp")
+        XCTAssertEqual(SubtitleLanguage.identify("spa"), "es")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.Spanish.Latin.srt"), "ea")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.Latino.srt"), "ea")
+        XCTAssertEqual(SubtitleLanguage.identify(tag: "spa", title: "Español (Latinoamérica)"), "ea")
+        XCTAssertEqual(SubtitleLanguage.identify(tag: "spa", title: "Castellano"), "sp")
+
+        // Chinese
+        XCTAssertEqual(SubtitleLanguage.identify("zh-Hant-TW"), "zh-tw")
+        XCTAssertEqual(SubtitleLanguage.identify("zh-HK"), "zh-tw")
+        XCTAssertEqual(SubtitleLanguage.identify("chi"), "zh")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.chs.srt"), "zh-cn")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.chs&eng.srt"), "ze")
+        XCTAssertEqual(SubtitleLanguage.guess(fromFilename: "Movie.zh-Hans.srt"), "zh-cn")
+        XCTAssertEqual(SubtitleLanguage.identify(tag: "chi", title: "简体中文字幕"), "zh-cn")
+        XCTAssertEqual(SubtitleLanguage.identify(tag: "chi", title: "Traditional"), "zh-tw")
+        XCTAssertEqual(SubtitleLanguage.identify(tag: "chi", title: "中英双语"), "ze")
+
+        // Others keep their region-free code.
+        XCTAssertEqual(SubtitleLanguage.identify("en-GB"), "en")
+        XCTAssertEqual(SubtitleLanguage.identify("nob"), "no")
+        XCTAssertEqual(SubtitleLanguage.identify("fa-AF"), "pr")
+        XCTAssertEqual(SubtitleLanguage.name(for: "por"), "Portuguese")
+        XCTAssertEqual(SubtitleLanguage.badge(for: "ea"), "ES-419")
+    }
+
+    func testLanguageMatching() {
+        typealias L = SubtitleLanguage
+        XCTAssertEqual(L.match("pt-pt", preference: "pt-pt"), .exact)
+        XCTAssertNil(L.match("pt-br", preference: "pt-pt"))
+        XCTAssertEqual(L.match("pt", preference: "pt-pt"), .unlabeledVariant)
+        XCTAssertEqual(L.match("pt-br", preference: "pt"), .exact)
+        XCTAssertEqual(L.match("pt", preference: "pt"), .exact)
+        XCTAssertEqual(L.match("es", preference: "sp"), .unlabeledVariant)
+        XCTAssertEqual(L.match("ea", preference: "es"), .exact)
+        XCTAssertNil(L.match("ea", preference: "sp"))
+        XCTAssertNil(L.match(nil, preference: "en"))
+
+        // Exact matches for any preference beat an unlabeled variant of the first.
+        let tracks = ["pt", "en", "pt-br"]
+        XCTAssertEqual(L.best(tracks, for: ["pt-pt", "en"], language: { $0 }), "en")
+        XCTAssertEqual(L.best(["pt", "fr"], for: ["pt-pt", "en"], language: { $0 }), "pt")
+        XCTAssertNil(L.best(["pt-br", "fr"], for: ["pt-pt", "en"], language: { $0 }))
+        XCTAssertEqual(L.best(tracks, for: ["pt", "en"], language: { $0 }), "pt")
+        XCTAssertEqual(L.best(["en", "pt-br"], for: ["pt-pt", "pt", "en"], language: { $0 }), "pt-br")
+
+        XCTAssertEqual(L.searchCodes(for: ["pt-pt", "en"]), ["en", "pt-pt"])
+        XCTAssertEqual(L.searchCodes(for: ["pt"]), ["pm", "pt-br", "pt-pt"])
+        XCTAssertEqual(L.searchCodes(for: ["sp"]), ["es", "sp"])
+        XCTAssertEqual(L.searchCodes(for: ["es"]), ["ea", "es", "sp"])
+        XCTAssertEqual(L.searchCodes(for: ["zh-tw"]), ["zh-tw"])
+
+        func result(_ id: Int, _ language: String, hash: Bool = false, downloads: Int = 0) -> OnlineSubtitle {
+            OnlineSubtitle(fileID: id, language: language, release: "", downloads: downloads, hashMatch: hash, hearingImpaired: false)
+        }
+        let sorted = OpenSubtitles.sorted([result(1, "es", hash: true), result(2, "en"), result(3, "sp", downloads: 5),
+                                           result(4, "sp", hash: true)], for: ["sp", "en"])
+        XCTAssertEqual(sorted.map(\.fileID), [4, 3, 2, 1])
+    }
+
+    func testLanguagePreferences() {
+        typealias L = SubtitleLanguage
+        XCTAssertEqual(L.defaultPreferences(systemLanguages: ["pt-PT", "en-PT"]), ["pt-pt", "en"])
+        XCTAssertEqual(L.defaultPreferences(systemLanguages: ["zh-Hant-TW"]), ["zh-tw"])
+        XCTAssertEqual(L.defaultPreferences(systemLanguages: ["tlh"]), ["en"])
+        XCTAssertEqual(L.migrate(["pt", "en"], systemLanguages: ["pt-PT", "en"]), ["pt-pt", "en"])
+        XCTAssertEqual(L.migrate(["pt", "en"], systemLanguages: ["en-US"]), ["pt", "en"])
+        XCTAssertEqual(L.migrate(["zh", "es"], systemLanguages: ["zh-Hans-CN"]), ["zh-cn", "es"])
+        XCTAssertEqual(L.migrate(["xx"], systemLanguages: ["fr-FR"]), ["fr"])
+        XCTAssertEqual(L.validated(["pt-pt", "xx", "pt-pt", "en"]), ["pt-pt", "en"])
+    }
+
+    func testLanguageCatalog() {
+        let ids = SubtitleLanguage.all.map(\.id)
+        XCTAssertEqual(Set(ids).count, ids.count, "Duplicate language ids")
+        // Everything OpenSubtitles lists, plus the Portuguese and Chinese families.
+        XCTAssertEqual(SubtitleLanguage.all.filter(\.isOnline).count, 105)
+        XCTAssertEqual(Set(SubtitleLanguage.all.filter { !$0.isOnline }.map(\.id)), ["pt", "zh"])
+        for language in SubtitleLanguage.all {
+            for variant in language.variants { XCTAssertEqual(SubtitleLanguage[variant]?.family, language.id) }
+            XCTAssertEqual(SubtitleLanguage.identify(language.id), language.id)
+        }
+        XCTAssertEqual(SubtitleLanguage["pt"]?.preferenceName, "Portuguese (any variant)")
+        XCTAssertEqual(SubtitleLanguage["pt"]?.note, "Portugal, Brazil or Mozambique")
+        XCTAssertEqual(SubtitleLanguage["pt-br"]?.nativeName, "Português (Brasil)")
+    }
+
+    func testSubtitleStyle() {
+        XCTAssertEqual(SubtitleStyle.hex(of: SubtitleStyle.color(hex: "#7FD4FF")!), "#7FD4FF")
+        XCTAssertEqual(SubtitleStyle.hex(of: SubtitleStyle.color(hex: "ff0000")!), "#FF0000")
+        XCTAssertNil(SubtitleStyle.color(hex: "#12345"))
+
+        // The system font at each weight, upright and italic.
+        let bold = SubtitleStyle(fontFace: "bold-italic").nsFont(size: 20)
+        XCTAssertTrue(bold.fontDescriptor.symbolicTraits.contains(.italic))
+        XCTAssertTrue(bold.fontDescriptor.symbolicTraits.contains(.bold))
+        XCTAssertEqual(SubtitleStyle().fontDescription, "System Semibold")
+
+        // Switching family keeps the nearest face.
+        let boldItalic = SubtitleTypeface.Face(id: "bold-italic", name: "Bold Italic", weight: 9, isItalic: true)
+        let georgia = SubtitleTypeface.closest(to: boldItalic, in: "Georgia")
+        XCTAssertEqual(georgia?.id, "Georgia-BoldItalic")
+        XCTAssertEqual(SubtitleStyle(fontFamily: "Georgia", fontFace: "Georgia-BoldItalic").fontDescription, "Georgia Bold Italic")
+        XCTAssertTrue(SubtitleTypeface.families.contains("Georgia"))
+        XCTAssertFalse(SubtitleTypeface.families.contains("Webdings"))
+
+        // A removed font falls back to the system font.
+        let missing = SubtitleStyle(fontFamily: "No Such Font", fontFace: "NoSuchFont-Bold").nsFont(size: 20)
+        XCTAssertEqual(missing.familyName, NSFont.systemFont(ofSize: 20).familyName)
     }
 
     func testFinder() {
@@ -151,6 +301,12 @@ final class SubtitleTests: XCTestCase {
         head[0] = 1          // adds 1
         head[15] = 0x80      // adds 0x80 << 56 in the second word
         XCTAssertEqual(OpenSubtitles.hash(size: 131_072, head: head, tail: zeros), "8000000000020001")
+    }
+
+    func testSearchQueryEscapesReservedCharacters() {
+        // "&" and "+" would otherwise end the title early; keys are sorted and values lowercased.
+        XCTAssertEqual(OpenSubtitles.queryString(["query": "Law & Order+SVU", "languages": "en,pt-pt"]),
+                       "languages=en,pt-pt&query=law%20%26%20order%2Bsvu")
     }
 }
 
@@ -199,5 +355,37 @@ final class StreamingUnitTests: XCTestCase {
         XCTAssertTrue(master.contains("TYPE=SUBTITLES"))
         XCTAssertTrue(master.contains("SUBTITLES=\"subs\"\nmedia.m3u8"))
         XCTAssertFalse(HLSSession.masterPlaylist(subtitleName: nil, language: nil).contains("SUBTITLES"))
+    }
+}
+
+final class TrackerListTests: XCTestCase {
+    func testParseSkipsCommentsAndBlankLines() {
+        let text = """
+        # Best trackers
+        udp://tracker.opentrackr.org:1337/announce
+
+          https://tracker.example.org/announce   # trailing comment
+        #udp://disabled.example.org:80
+        \r
+        udp://open.stealth.si:80/announce\r
+        """
+        XCTAssertEqual(TrackerList.parse(text), [
+            "udp://tracker.opentrackr.org:1337/announce",
+            "https://tracker.example.org/announce",
+            "udp://open.stealth.si:80/announce",
+        ])
+    }
+
+    func testKeyIgnoresCaseAndTrailingSlash() {
+        XCTAssertEqual(TrackerList.key(" UDP://Tracker.Example.org:80/announce/ "),
+                       TrackerList.key("udp://tracker.example.org:80/announce"))
+    }
+
+    func testValidity() {
+        XCTAssertTrue(TrackerList.isValid("udp://tracker.example.org:1337/announce"))
+        XCTAssertTrue(TrackerList.isValid("wss://tracker.example.org"))
+        XCTAssertFalse(TrackerList.isValid("tracker.example.org:1337"))
+        XCTAssertFalse(TrackerList.isValid("ftp://tracker.example.org"))
+        XCTAssertFalse(TrackerList.isValid("udp://"))
     }
 }

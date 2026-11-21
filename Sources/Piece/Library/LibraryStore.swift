@@ -58,7 +58,8 @@ final class LibraryStore {
     func remove(_ ids: Set<UUID>, moveToTrash: Bool) {
         if moveToTrash {
             for item in items where ids.contains(item.id) {
-                try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
+                // A packed item's only copy is its archive.
+                try? FileManager.default.trashItem(at: item.packURL ?? item.url, resultingItemURL: nil)
             }
         }
         items.removeAll { ids.contains($0.id) }
@@ -151,22 +152,29 @@ final class LibraryStore {
         let folder = ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent
         switch FileKind(path: path) {
         case .video:
-            let lower = filename.lowercased()
-            let isExtra = lower.contains("sample") || lower.contains("trailer") || folder.lowercased() == "sample"
-            if isExtra, size < 200 * 1024 * 1024 { return nil }
-
             let fromFile = ReleaseNameParser.parse(filename)
+            if Self.isExtra(filename: filename, title: fromFile.title, folder: folder), size < 200 * 1024 * 1024 { return nil }
+
             let fromFolder = ReleaseNameParser.parse(folder)
             let folderLooksLikeRelease = fromFolder.year != nil || fromFolder.resolution != nil || fromFolder.isEpisode
+            // "Show/Season 1/01 - Pilot.mkv": the folder is only the season, and the one above it names the show.
+            let bareSeason = Self.bareSeason(folder)
+            let folderSeason = fromFolder.season ?? bareSeason
 
-            if fromFile.isEpisode || (fromFolder.season != nil && Self.leadingNumber(filename) != nil) {
+            if fromFile.isEpisode || (folderSeason != nil && Self.leadingNumber(filename) != nil) {
                 var item = MediaItem(kind: .episode, path: path, title: "")
-                item.season = fromFile.season ?? fromFolder.season ?? 1
+                item.season = fromFile.season ?? folderSeason ?? 1
                 item.episode = fromFile.episode ?? Self.leadingNumber(filename)
                 var show = fromFile.isEpisode ? fromFile.title : ""
                 // "S01E02.mkv" inside "Show Name Season 1": the folder carries the title.
                 if show.count < 2 || show.lowercased().hasPrefix("episode") {
-                    show = folderLooksLikeRelease ? fromFolder.title : folder
+                    if bareSeason != nil {
+                        let showFolder = (((path as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent as NSString)
+                            .lastPathComponent
+                        show = ReleaseNameParser.parse(showFolder).title
+                    } else {
+                        show = folderLooksLikeRelease ? fromFolder.title : folder
+                    }
                 }
                 item.showTitle = show
                 item.title = "Episode \(item.episode ?? 0)"
@@ -202,6 +210,24 @@ final class LibraryStore {
         default:
             return nil
         }
+    }
+
+    /// Samples and trailers: the word appears outside the title ("Film.2010.Trailer.mkv", "Show.S01E01.sample.mkv"),
+    /// is the whole name ("sample.mkv"), or the file sits in a "Sample" folder. "Trailer Park Boys S01E01" is a show.
+    nonisolated static func isExtra(filename: String, title: String, folder: String) -> Bool {
+        if folder.lowercased() == "sample" { return true }
+        func words(_ text: String) -> [String] {
+            text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        }
+        let name = words((filename as NSString).deletingPathExtension), inTitle = words(title)
+        return ["sample", "trailer"].contains { word in
+            name == [word] || name.filter { $0 == word }.count > inTitle.filter { $0 == word }.count
+        }
+    }
+
+    /// The season number of a folder named only for it: "Season 1", "Series 02", "S3".
+    nonisolated private static func bareSeason(_ folder: String) -> Int? {
+        folder.firstMatch(of: /^(?i)(?:season|series|s)[\s._-]*(\d{1,2})$/).flatMap { Int($0.1) }
     }
 
     nonisolated private static func leadingNumber(_ filename: String) -> Int? {

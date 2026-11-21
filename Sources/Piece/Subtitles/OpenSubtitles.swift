@@ -13,11 +13,13 @@ struct OnlineSubtitle: Identifiable, Hashable {
 enum OpenSubtitlesError: LocalizedError {
     case missingKey
     case server(String)
+    /// 401: the key, or the login token, isn't accepted.
+    case unauthorized(String)
 
     var errorDescription: String? {
         switch self {
         case .missingKey: "Add your OpenSubtitles API key in Settings → Subtitles to search online."
-        case .server(let message): message
+        case .server(let message), .unauthorized(let message): message
         }
     }
 }
@@ -57,16 +59,33 @@ final class OpenSubtitles {
         return hash(size: size, head: head, tail: tail)
     }
 
-    private func request(_ path: String, query: [String: String] = [:], body: [String: Any]? = nil) throws -> URLRequest {
+    /// The API redirects unless parameters are lowercase and alphabetically sorted. Values are escaped by hand
+    /// because URLQueryItem leaves "&", "+" and "=" alone, which cuts a title like "Law & Order" short.
+    static func queryString(_ query: [String: String]) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=#")
+        return query.sorted { $0.key < $1.key }.map {
+            $0.key + "=" + ($0.value.lowercased().addingPercentEncoding(withAllowedCharacters: allowed) ?? "")
+        }.joined(separator: "&")
+    }
+
+    /// The user's own API key, or the one built into the app.
+    static var apiKey: String {
         let own = AppSettings.shared.openSubtitlesKey.trimmingCharacters(in: .whitespaces)
-        let key = own.isEmpty ? BuiltInKeys.openSubtitles : own
+        return own.isEmpty ? BuiltInKeys.openSubtitles : own
+    }
+
+    static var hasKey: Bool { !apiKey.isEmpty }
+
+    private func request(_ path: String, query: [String: String] = [:], body: [String: Any]? = nil) throws -> URLRequest {
+        let key = Self.apiKey
         guard !key.isEmpty else { throw OpenSubtitlesError.missingKey }
         var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty {
-            // The API redirects unless parameters are lowercase and alphabetically sorted.
-            components.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value.lowercased()) }
+            components.percentEncodedQuery = Self.queryString(query)
         }
         var request = URLRequest(url: components.url!)
+        request.timeoutInterval = 20
         request.setValue(key, forHTTPHeaderField: "Api-Key")
         request.setValue("Piece v1.0.0", forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -84,7 +103,8 @@ final class OpenSubtitles {
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
             let message = json["message"] as? String ?? (json["errors"] as? [String])?.first
-            throw OpenSubtitlesError.server(message ?? "OpenSubtitles returned an error (\(http.statusCode)).")
+                ?? "OpenSubtitles returned an error (\(http.statusCode))."
+            throw http.statusCode == 401 ? OpenSubtitlesError.unauthorized(message) : OpenSubtitlesError.server(message)
         }
         return json
     }
@@ -98,6 +118,7 @@ final class OpenSubtitles {
         token = (try? await send(request))?["token"] as? String
     }
 
+    /// `languages` are subtitle language ids in order of preference; see `SubtitleLanguage.searchCodes(for:)`.
     func search(query: String?, movieHash: String?, season: Int? = nil, episode: Int? = nil,
                 year: Int? = nil, languages: [String]) async throws -> [OnlineSubtitle] {
         var params: [String: String] = [:]
@@ -106,16 +127,27 @@ final class OpenSubtitles {
         if let season { params["season_number"] = String(season) }
         if let episode { params["episode_number"] = String(episode) }
         if let year, season == nil { params["year"] = String(year) }
-        if !languages.isEmpty { params["languages"] = languages.sorted().joined(separator: ",") }
+        let codes = SubtitleLanguage.searchCodes(for: languages)
+        if !codes.isEmpty { params["languages"] = codes.joined(separator: ",") }
         guard params["query"] != nil || params["moviehash"] != nil else { return [] }
 
         let json = try await send(try request("subtitles", query: params))
-        return Self.parseResults(json).sorted {
-            if $0.hashMatch != $1.hashMatch { return $0.hashMatch }
-            let l0 = languages.firstIndex(of: $0.language) ?? .max, l1 = languages.firstIndex(of: $1.language) ?? .max
-            if l0 != l1 { return l0 < l1 }
-            return $0.downloads > $1.downloads
-        }
+        return Self.sorted(Self.parseResults(json), for: languages)
+    }
+
+    /// Exact language matches first, then ones that don't say which variant they are; within each, subtitles
+    /// matched to this exact file, then preference order, then popularity.
+    static func sorted(_ results: [OnlineSubtitle], for languages: [String]) -> [OnlineSubtitle] {
+        results.map { (result: $0, rank: SubtitleLanguage.rank($0.language, in: languages)) }
+            .sorted { a, b in
+                let ma = a.rank?.match.rawValue ?? .max, mb = b.rank?.match.rawValue ?? .max
+                if ma != mb { return ma < mb }
+                if a.result.hashMatch != b.result.hashMatch { return a.result.hashMatch }
+                let pa = a.rank?.preference ?? .max, pb = b.rank?.preference ?? .max
+                if pa != pb { return pa < pb }
+                return a.result.downloads > b.result.downloads
+            }
+            .map(\.result)
     }
 
     static func parseResults(_ json: [String: Any]) -> [OnlineSubtitle] {
@@ -139,11 +171,23 @@ final class OpenSubtitles {
         let cached = AppPaths.subtitles.appendingPathComponent("os-\(fileID).srt")
         if FileManager.default.fileExists(atPath: cached.path) { return cached }
         await loginIfNeeded()
-        let json = try await send(try request("download", body: ["file_id": fileID]))
+        let json: [String: Any]
+        do {
+            json = try await send(try request("download", body: ["file_id": fileID]))
+        } catch OpenSubtitlesError.unauthorized where token != nil {
+            // Login tokens expire after about a day; get a fresh one and try once more.
+            token = nil
+            await loginIfNeeded()
+            json = try await send(try request("download", body: ["file_id": fileID]))
+        }
         guard let link = json["link"] as? String, let url = URL(string: link) else {
             throw OpenSubtitlesError.server(json["message"] as? String ?? "No download link was returned.")
         }
-        let (data, _) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await URLSession.shared.data(from: url)
+        if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+            throw OpenSubtitlesError.server("The subtitle file couldn't be downloaded (\(http.statusCode)).")
+        }
+        guard !data.isEmpty else { throw OpenSubtitlesError.server("The subtitle file was empty.") }
         try data.write(to: cached, options: .atomic)
         return cached
     }

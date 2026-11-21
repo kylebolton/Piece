@@ -1,7 +1,8 @@
 import Foundation
 
 enum TorrentPhase: String {
-    case fetchingMetadata, checking, downloading, seeding, completed, paused, queued, error
+    /// Paused by `TransferPolicy` (battery or metered connection), not by the user.
+    case fetchingMetadata, checking, downloading, seeding, completed, paused, queued, held, error
 
     var label: String {
         switch self {
@@ -12,6 +13,7 @@ enum TorrentPhase: String {
         case .completed: "Completed"
         case .paused: "Paused"
         case .queued: "Queued"
+        case .held: "Waiting"
         case .error: "Error"
         }
     }
@@ -40,6 +42,8 @@ final class Torrent: Identifiable, Hashable {
     var pieceCount = 0
     var pieceLength = 0
     var dateAdded = Date()
+    /// What a held transfer is waiting for, e.g. "Waiting for power".
+    var heldStatus = ""
     var speedHistory: [SpeedSample] = []
 
     init(id: String, name: String) {
@@ -50,7 +54,9 @@ final class Torrent: Identifiable, Hashable {
     static func == (lhs: Torrent, rhs: Torrent) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
-    var isPaused: Bool { phase == .paused }
+    var isPaused: Bool { phase == .paused || phase == .held }
+    /// The row's toggle would resume it rather than pause it.
+    var canResume: Bool { phase == .paused || phase == .held || phase == .completed || phase == .error }
     var isActive: Bool { phase == .downloading || phase == .fetchingMetadata || phase == .checking || phase == .queued }
 
     var etaSeconds: Double? {
@@ -79,6 +85,9 @@ final class Torrent: Identifiable, Hashable {
             return hasMetadata ? "\(Format.bytes(totalWantedDone)) of \(Format.bytes(totalWanted))  ·  Paused" : "Paused"
         case .queued:
             return "Waiting in queue"
+        case .held:
+            let done = isComplete ? Format.bytes(totalWanted) : hasMetadata ? "\(Format.bytes(totalWantedDone)) of \(Format.bytes(totalWanted))" : nil
+            return [done, heldStatus].compactMap { $0 }.joined(separator: "  ·  ")
         case .error:
             return errorMessage ?? "Something went wrong"
         }
@@ -113,6 +122,8 @@ final class Torrent: Identifiable, Hashable {
         let phase: TorrentPhase
         if s.errorMessage != nil {
             phase = .error
+        } else if s.held {
+            phase = .held
         } else if s.paused && !s.autoManaged {
             phase = done ? .completed : .paused
         } else if s.state == .checking {
@@ -140,7 +151,10 @@ struct SpeedSample: Hashable {
 
 struct TorrentFile: Identifiable, Hashable {
     var index: Int
+    /// The file's real path in the torrent, with no `.part` suffix.
     var path: String
+    /// What the file is called on disk right now.
+    var diskPath: String
     var size: Int64
     var downloaded: Int64
     var priority: Int
@@ -155,6 +169,7 @@ struct TorrentFile: Identifiable, Hashable {
     init(_ f: KTFileEntry) {
         index = Int(f.index)
         path = f.path
+        diskPath = f.diskPath
         size = f.size
         downloaded = f.downloaded
         priority = Int(f.priority)
