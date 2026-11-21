@@ -3,12 +3,12 @@
     <channel>
         <title>Piece</title>
         <item>
-            <title>1.2.1</title>
-            <pubDate>Sun, 11 Oct 2026 19:43:03 +0100</pubDate>
-            <sparkle:version>8</sparkle:version>
-            <sparkle:shortVersionString>1.2.1</sparkle:shortVersionString>
+            <title>1.3.0</title>
+            <pubDate>Sat, 21 Nov 2026 01:15:56 +0000</pubDate>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>1.3.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/kylebolton/Piece/releases/download/v1.2.1/Piece-1.2.1.zip" length="156633106" type="application/octet-stream" sparkle:edSignature="Ez2U6acBWzWugVa0ebcjzYAiVV+QCI6Gvn9Gcohvs88PaVQ7zSGdxr9fELtP9zPr3QpPYLBFFgqSJ5gdky4bDw=="/>
+            <enclosure url="https://github.com/kylebolton/Piece/releases/download/v1.3.0/Piece-1.3.0.zip" length="158040291" type="application/octet-stream" sparkle:edSignature="mJcoJtKw/2t8dbM7kgqSJCaAtxxqNz1pc3jCXNVAtad6JpxnGsM0+WUDd+SNwAZ31HE01gCzahKEDkYqxUgeDw=="/>
         </item>
     </channel>
 </rss>
